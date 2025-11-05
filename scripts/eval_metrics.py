@@ -27,6 +27,8 @@ COORDS_UMAP = BASE / 'coords_umap.npy'
 COORDS_TSNE = BASE / 'coords_tsne.npy'
 LABELS = BASE / 'cluster_labels.npy'
 OUT_JSON = BASE / 'metrics.json'
+OUT_JSON_PER_RUN = BASE / f'metrics-{time.strftime("%Y%m%dT%H%M%S")}.json'
+OUT_LOG_CSV = BASE / 'metrics_log.csv'
 REPORT = BASE / 'report.md'
 
 # Helpers
@@ -181,6 +183,12 @@ if __name__ == '__main__':
     try:
         with open(OUT_JSON, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2)
+        # write a per-run JSON for historical tracking
+        try:
+            with open(OUT_JSON_PER_RUN, 'w', encoding='utf-8') as fr:
+                json.dump(results, fr, indent=2)
+        except Exception:
+            pass
         print('Wrote metrics to', OUT_JSON)
     except Exception as e:
         print('Could not write metrics.json:', e)
@@ -218,5 +226,26 @@ if __name__ == '__main__':
         print('Appended metrics summary to', REPORT)
     except Exception as e:
         print('Could not append to report.md:', e)
+
+    # append a one-line CSV log for quick history view
+    try:
+        import csv
+        # flatten a few key metrics into a CSV row
+        row = {
+            'timestamp': ts,
+            'n_points': sum(r.get('n_points', 0) for r in results['runs'].values()),
+            'pca_trust_k5': results['runs'].get('pca', {}).get('trustworthiness_k5'),
+            'umap_trust_k5': results['runs'].get('umap', {}).get('trustworthiness_k5'),
+            'tsne_trust_k5': results['runs'].get('tsne', {}).get('trustworthiness_k5'),
+        }
+        write_header = not OUT_LOG_CSV.exists()
+        with open(OUT_LOG_CSV, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+            if write_header:
+                writer.writeheader()
+            writer.writerow(row)
+        print('Appended metrics summary to', OUT_LOG_CSV)
+    except Exception:
+        pass
 
     print('Done.')

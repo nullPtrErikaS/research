@@ -25,6 +25,7 @@ from .reduce import run_pca
 from .neighbors import compute_neighbors
 from .cluster import run_clustering
 from .embed import run_tsne, run_umap
+from .viz import plot_scatter, plot_comparison, plot_heatmap
 
 __all__ = [
     'load_corpus',
