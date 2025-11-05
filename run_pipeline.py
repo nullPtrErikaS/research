@@ -1,4 +1,4 @@
-from parse import (
+from src.processor import (
     load_corpus,
     normalize_corpus,
     preprocess_texts,

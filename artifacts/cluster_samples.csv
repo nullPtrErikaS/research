@@ -1,0 +1,25 @@
+cluster,doc_id,text_short,text_full
+0,doc_0005,"If you imagine yourself as the reader, and more importantly use and test the dashboard during and after creation, you will get it right.","If you imagine yourself as the reader, and more importantly use and test the dashboard during and after creation, you will get it right."
+0,doc_0006,Use the right visuals,Use the right visuals
+0,doc_0012,Create associations by organizing and grouping dashboard elements sensibly.,Create associations by organizing and grouping dashboard elements sensibly.
+1,doc_0002,"Before you start to present anything, you need to have a clear idea of why you are creating this dashboard and what information it needs to show.","Before you start to present anything, you need to have a clear idea of why you are creating this dashboard and what information it needs to show."
+1,doc_0003,Draw out your dashboard to get an idea of where everything should go.,Draw out your dashboard to get an idea of where everything should go.
+1,doc_0007,"Add interactive elements to your dashboards so that users can easily navigate, filter, and sort the information.","Add interactive elements to your dashboards so that users can easily navigate, filter, and sort the information."
+2,doc_0001,"The areas of the dashboard that get the most attention are the top and down the left. Therefore this is where your most important information, visuals, and interactive elements should be used.","The areas of the dashboard that get the most attention are the top and down the left. Therefore this is where your most important information, visuals, and interactive elements should be used."
+2,doc_0008,"If something does not add to the story your dashboard is trying to tell, get rid of it.","If something does not add to the story your dashboard is trying to tell, get rid of it. "
+2,doc_0027,"In terms of positioning, the top left corner of your dashboard is the best location","In terms of positioning, the top left corner of your dashboard is the best location"
+3,doc_0062,"When integrating data tables or lists, make sure they are interactive and data is aligned correctly.","When integrating data tables or lists, make sure they are interactive and data is aligned correctly."
+3,doc_0088,"As always, make sure that the visualization is enhancing, not distracting from the contents of your dashboard","As always, make sure that the visualization is enhancing, not distracting from the contents of your dashboard"
+3,doc_0096,"The first step in building a dashboard is to make sure you know exactly what to build, and whom you’re building it for.","The first step in building a dashboard is to make sure you know exactly what to build, and whom you’re building it for."
+4,doc_0000,think about your dashboard on different devices.,think about your dashboard on different devices.
+4,doc_0013,Be consistent with fonts and colors,Be consistent with fonts and colors
+4,doc_0024,Giving groups a title makes them easier to spot.,Giving groups a title makes them easier to spot.
+5,doc_0021,Use the most efficient visualization,Use the most efficient visualization
+5,doc_0022,pie charts and area charts are rarely the best choice of visualization.,pie charts and area charts are rarely the best choice of visualization.
+5,doc_0044,"When using a horizontal or vertical bar chart, try to sort columns by biggest value rather than not randomly sorting them.","When using a horizontal or vertical bar chart, try to sort columns by biggest value rather than not randomly sorting them."
+6,doc_0004,Your goal is to create a dashboard that presents the data in a meaningful way that your readers can understand instantly,Your goal is to create a dashboard that presents the data in a meaningful way that your readers can understand instantly
+6,doc_0016,Don’t try to fit all the information on one page.,Don’t try to fit all the information on one page.
+6,doc_0018,Include only the most important content,Include only the most important content
+7,doc_0009,"If you are comparing a value to another such as a target, KPI, or last week's value, indicate whether there was success or not, and what was the margin of difference.","If you are comparing a value to another such as a target, KPI, or last week's value, indicate whether there was success or not, and what was the margin of difference."
+7,doc_0010,[Showing context] can be done using color or simple symbols such as up and down arrows.,[Showing context] can be done using color or simple symbols such as up and down arrows. 
+7,doc_0011,Add more emphasis to headers and key values by making fonts larger or use a darker color.,Add more emphasis to headers and key values by making fonts larger or use a darker color.

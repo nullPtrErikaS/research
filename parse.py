@@ -1,9 +1,15 @@
+"""Text corpus analysis prototype.
+
+Small one-file pipeline for loading guidelines, doing a bit of cleaning,
+tokenization, TF-IDF, dimensionality reduction and simple plotting.
+
+This is intentionally compact and pragmatic — helpful for exploratory
+work. Outputs are written to ``artifacts/`` and ``visualizations/``.
 """
-Text corpus analysis prototype
-"""
-# quick pipeline: load csv, clean text, tokenize, TF-IDF, reduce, plot.
-# can also run t-SNE/UMAP or cluster if you feel like it. outputs go in
-# artifacts/ and visualizations/ (messy but useful).
+
+# Quick overview: load CSV -> clean -> tokenize -> TF-IDF -> reduce -> plot.
+# Optional steps: t-SNE/UMAP, nearest-neighbors, clustering. Artifacts and
+# plots are written under the project `artifacts/` and `visualizations/`.
 import pandas as pd
 import re
 from pathlib import Path
@@ -70,20 +76,35 @@ except Exception:
 # ============================================================================
 
 def load_corpus(filepath):
-    """Load CSV and add stable doc IDs"""
+    """Load a CSV into a DataFrame and add a stable `doc_id` column.
+
+    Args:
+        filepath: path to a CSV file readable by ``pandas.read_csv``.
+
+    Returns:
+        pd.DataFrame with an added `doc_id` column (doc_0000, doc_0001, ...).
+    """
     df = pd.read_csv(filepath)
+    # create a simple stable id for each row, useful for plotting/lookup
     df['doc_id'] = [f"doc_{i:04d}" for i in range(len(df))]
     print(f"Loaded {len(df)} docs")
     return df
 
 
 def basic_clean(text):
-    """cleaning - removes URLs, extra whitespace"""
+    """Lightweight cleaning: strip URLs and collapse whitespace.
+
+    Returns an empty string for missing values to keep downstream code
+    consistent (avoids NaNs in text columns).
+    """
     if pd.isna(text):
+        # normalize missing -> empty string for later tokenization/vectorization
         return ""
     text = str(text)
-    text = re.sub(r'http\S+', '', text)  # urls
-    text = re.sub(r'\s+', ' ', text).strip()  # whitespace
+    # drop obvious URLs
+    text = re.sub(r'http\S+', '', text)
+    # collapse repeated whitespace/newlines into single spaces and trim
+    text = re.sub(r'\s+', ' ', text).strip()
     return text
 
 
@@ -143,19 +164,28 @@ def _ensure_dense_for_embedding(X, n_components_for_init=50):
     """
     if X is None:
         return None
+
+    # If input is a sparse matrix (has toarray) we prefer to reduce its
+    # dimensionality with TruncatedSVD rather than densify the full matrix
+    # (which could be huge). The reduced dense output is friendlier for
+    # UMAP/t-SNE which expect in-memory arrays.
     if hasattr(X, 'toarray') and not isinstance(X, np.ndarray):
         try:
             svd = TruncatedSVD(n_components=min(n_components_for_init, X.shape[1]-1), random_state=42)
             Xred = svd.fit_transform(X)
             return Xred
         except Exception:
+            # fallback: try to convert to dense array directly
             try:
                 return X.toarray()
             except Exception:
                 return None
+
+    # already dense numpy array -> pass through
     if isinstance(X, np.ndarray):
         return X
-    # last resort
+
+    # last resort: attempt to coerce to numpy array
     try:
         return np.array(X)
     except Exception:
@@ -180,6 +210,8 @@ def save_artifacts(df, output_dir='artifacts'):
     df.to_csv(f'{output_dir}/processed_data.csv', index=False)
     
     print(f"Saved artifacts to {output_dir}/")
+    # Note: caller may have added extra columns (tokens, cluster, etc.)
+    # so processed_data.csv is a convenient snapshot of current DataFrame state.
 
 
 def ensure_nltk_resources():
@@ -187,6 +219,7 @@ def ensure_nltk_resources():
     if not NLTK_AVAILABLE:
         print("NLTK not available (install with: pip install nltk)")
         return
+    # This will try to download a small set of commonly-needed resources.
     # punkt (sentence tokenizer) sometimes requires extra 'punkt_tab' resource
     try:
         nltk.data.find('tokenizers/punkt')
@@ -227,7 +260,8 @@ def preprocess_texts(df, text_col='cleaned_text', config=PREPROCESSING_CONFIG):
     """
     if not NLTK_AVAILABLE:
         print("NLTK not installed — skipping advanced preprocessing. Install with: pip install nltk")
-        # fallback: use cleaned_text as preprocessed_text
+        # fallback: tokenization is a simple whitespace split so downstream
+        # vectorizers still have something to work with.
         df['tokens'] = df[text_col].fillna('').astype(str).str.split()
         df['preprocessed_text'] = df[text_col].fillna('').astype(str)
         return df
@@ -236,11 +270,13 @@ def preprocess_texts(df, text_col='cleaned_text', config=PREPROCESSING_CONFIG):
     stop_words = set(stopwords.words('english')) if config.get('remove_stopwords', True) else set()
     lemmatizer = WordNetLemmatizer() if config.get('lemmatize', True) else None
 
-    # tokenize, drop stopwords, lemmatize if available. makes things less noisy.
-
+    # Tokenize and clean each document. We keep only alphabetic tokens,
+    # enforce a minimum length and remove stopwords. Lemmatization is
+    # applied if the WordNet lemmatizer is available.
     tokens_out = []
 
     for text in df[text_col].fillna('').astype(str):
+        # optional lowercasing to reduce sparsity
         if config.get('lowercase', True):
             text_proc = text.lower()
         else:
@@ -249,17 +285,24 @@ def preprocess_texts(df, text_col='cleaned_text', config=PREPROCESSING_CONFIG):
         try:
             toks = word_tokenize(text_proc)
         except LookupError:
-            # fallback simple tokenizer: split on non-word characters
+            # simple fallback if punkt/tokenizers aren't available
             toks = re.findall(r"\b[\w']+\b", text_proc)
+
         cleaned = []
         for t in toks:
-            # keep alphabetic tokens only
+            # keep alphabetic tokens only (drops punctuation/numbers)
             if not re.match(r"^[A-Za-z]+$", t):
                 continue
+
+            # enforce minimum token length
             if len(t) < config.get('min_word_length', 3):
                 continue
+
+            # basic stopword removal
             if t in stop_words:
                 continue
+
+            # optional lemmatization to reduce inflectional forms
             if lemmatizer is not None:
                 t = lemmatizer.lemmatize(t)
             cleaned.append(t)
@@ -267,6 +310,7 @@ def preprocess_texts(df, text_col='cleaned_text', config=PREPROCESSING_CONFIG):
         tokens_out.append(cleaned)
 
     df['tokens'] = tokens_out
+    # space-joined form is convenient for scikit-learn vectorizers
     df['preprocessed_text'] = df['tokens'].apply(lambda toks: ' '.join(toks))
     non_empty = (df['preprocessed_text'] != '').sum()
     print(f"Preprocessed {non_empty}/{len(df)} non-empty texts")
@@ -274,76 +318,38 @@ def preprocess_texts(df, text_col='cleaned_text', config=PREPROCESSING_CONFIG):
 
 
 def build_tfidf(df, text_col='preprocessed_text', config=TFIDF_CONFIG, output_dir='artifacts'):
-    """Build TF-IDF matrix and save vectorizer + vocabulary.
+    """Wrapper that delegates to `src.processor.vectorize.build_tfidf`.
 
-    Returns: (X, vectorizer) where X is sparse matrix
+    Kept for backward compatibility with callers that import `build_tfidf`
+    from `parse.py`.
     """
-    if not SKLEARN_AVAILABLE:
-        print("scikit-learn not installed — cannot build TF-IDF. Install with: pip install scikit-learn")
-        return None, None
-
-    vect = TfidfVectorizer(max_features=config.get('max_features'),
-                           min_df=config.get('min_df'),
-                           max_df=config.get('max_df'),
-                           ngram_range=config.get('ngram_range', (1, 1)))
-
-    texts = df[text_col].fillna('').astype(str).tolist()
-    X = vect.fit_transform(texts)
-
-    Path(output_dir).mkdir(exist_ok=True)
-    with open(f'{output_dir}/tfidf_vectorizer.pkl', 'wb') as f:
-        pickle.dump(vect, f)
-
-    # save vocabulary
-    with open(f'{output_dir}/vocabulary.pkl', 'wb') as f:
-        pickle.dump(vect.vocabulary_, f)
-
-    # save sparse matrix
     try:
-        from scipy import sparse
-        sparse.save_npz(f'{output_dir}/tfidf_matrix.npz', X)
+        from src.processor.vectorize import build_tfidf as _build
     except Exception:
-        # fallback to dense save (only for small corpora)
-        np.save(f'{output_dir}/tfidf_matrix.npy', X.toarray())
-
-    print(f"Built TF-IDF matrix: shape={X.shape}")
-    return X, vect
+        # fallback: use local implementation if new module missing
+        print('Could not import src.processor.vectorize; ensure modularization applied correctly')
+        return None, None
+    return _build(df, text_col=text_col, config=config, output_dir=output_dir)
+    # Vectorizer and vocabulary are saved so you can re-use the same
+    # mapping later (e.g. to transform new documents without refitting).
 
 # TF-IDF is sparse. reduce with SVD before turning dense for embeddings.
 
 
 def run_pca(X, n_components=2, output_dir='artifacts'):
-    """Run dimensionality reduction. Use TruncatedSVD if input is sparse.
+    """Wrapper that delegates to `src.processor.reduce.run_pca`.
 
-    Returns coordinates (n_samples, n_components) as numpy array.
+    Maintains backward compatibility for callers importing `run_pca` from
+    `parse.py`.
     """
-    if X is None:
-        print("No matrix provided to run_pca")
-        return None
-
-    Path(output_dir).mkdir(exist_ok=True)
-
     try:
-        # prefer TruncatedSVD for sparse matrices
-        if hasattr(X, 'toarray') and not isinstance(X, np.ndarray):
-            svd = TruncatedSVD(n_components=n_components, random_state=42)
-            coords = svd.fit_transform(X)
-            # save model
-            with open(f'{output_dir}/svd_model.pkl', 'wb') as f:
-                pickle.dump(svd, f)
-        else:
-            pca = SKPCA(n_components=n_components, random_state=42)
-            coords = pca.fit_transform(X)
-            with open(f'{output_dir}/pca_model.pkl', 'wb') as f:
-                pickle.dump(pca, f)
-    except Exception as e:
-        print(f"Dimensionality reduction failed: {e}")
+        from src.processor.reduce import run_pca as _run_pca
+    except Exception:
+        print('Could not import src.processor.reduce.run_pca; ensure modularization applied correctly')
         return None
-
-    # coords -> save
-    np.save(f'{output_dir}/coords.npy', coords)
-    print(f"Saved coords shape={coords.shape} to {output_dir}")
-    return coords
+    return _run_pca(X, n_components=n_components, output_dir=output_dir)
+    # coords.npy holds the low-dim representation (rows align with input
+    # documents). Useful for quick plotting or as input to neighbors/clustering.
 
 # run_pca: quick 2D layout -> artifacts/coords.npy. fallback for neighbors/clusters.
 
@@ -370,6 +376,8 @@ def plot_scatter(coords, df, output_dir='visualizations', title='PCA / SVD scatt
         plt.ylim(ymin, ymax)
 
     # optionally label a few points
+    # label only a handful of points to avoid clutter; this uses the
+    # first 10 docs which is fine for quick sanity checks.
     for i, doc_id in enumerate(df['doc_id'].head(10)):
         plt.annotate(doc_id, (x[i], y[i]), fontsize=6, alpha=0.8)
 
@@ -548,147 +556,43 @@ def write_summary_report(df, output_dir_art='artifacts', output_dir_vis='visuali
 
 
 def run_tsne(X, config=TSNE_CONFIG, output_dir='artifacts'):
-    """Run t-SNE on X (or a reduced version) and save coords."""
-    # t-SNE: pretty but slow. use for viz, not as features.
-    if not TSNE_AVAILABLE:
-        print("scikit-learn TSNE not available install scikit-learn>=0.24")
-        return None
-
-    Xdense = _ensure_dense_for_embedding(X, n_components_for_init=50)
-    if Xdense is None:
-        print("Unable to prepare dense input for t-SNE")
-        return None
-
-    cfg = config.copy()
-    n_components = cfg.pop('n_components', 2)
+    """Compatibility wrapper delegating to `src.processor.embed.run_tsne`."""
     try:
-        tsne = TSNE(n_components=n_components, **cfg, random_state=42)
-        coords = tsne.fit_transform(Xdense)
-    except TypeError:
-        # older sklearn versions accept perplexity, learning_rate etc.; fallback
-        tsne = TSNE(n_components=n_components, random_state=42)
-        coords = tsne.fit_transform(Xdense)
-
-    Path(output_dir).mkdir(exist_ok=True)
-    np.save(f'{output_dir}/coords_tsne.npy', coords)
-    print(f"Saved t-SNE coords shape={coords.shape} to {output_dir}/coords_tsne.npy")
-    return coords
+        from src.processor.embed import run_tsne as _run
+    except Exception:
+        print('Could not import src.processor.embed.run_tsne; ensure modularization applied correctly')
+        return None
+    return _run(X, config=config, output_dir=output_dir)
 
 
 def run_umap(X, config=UMAP_CONFIG, output_dir='artifacts'):
-    """Run UMAP on X (or a reduced version) and save coords."""
-    if not UMAP_AVAILABLE:
-        print("umap-learn not available install with: pip install umap-learn")
-        return None
-
-    Xdense = _ensure_dense_for_embedding(X, n_components_for_init=50)
-    if Xdense is None:
-        print("Unable to prepare dense input for UMAP")
-        return None
-
-    cfg = config.copy()
-    n_components = cfg.pop('n_components', 2)
+    """Compatibility wrapper delegating to `src.processor.embed.run_umap`."""
     try:
-        reducer = _umap.UMAP(n_components=n_components, **cfg, random_state=42)
-        coords = reducer.fit_transform(Xdense)
-    except Exception as e:
-        print(f"UMAP failed: {e}")
+        from src.processor.embed import run_umap as _run
+    except Exception:
+        print('Could not import src.processor.embed.run_umap; ensure modularization applied correctly')
         return None
-
-    Path(output_dir).mkdir(exist_ok=True)
-    np.save(f'{output_dir}/coords_umap.npy', coords)
-    print(f"Saved UMAP coords shape={coords.shape} to {output_dir}/coords_umap.npy")
-    return coords
+    return _run(X, config=config, output_dir=output_dir)
 
 
 def compute_neighbors(X_or_coords, n_neighbors=10, output_dir='artifacts'):
-    """Compute nearest neighbors on provided data (dense or coords) and save indices/distances."""
-    if not NEIGHBORS_AVAILABLE:
-        print("sklearn NearestNeighbors not available install scikit-learn")
+    """Compatibility wrapper that delegates to `src.processor.neighbors.compute_neighbors`."""
+    try:
+        from src.processor.neighbors import compute_neighbors as _compute
+    except Exception:
+        print('Could not import src.processor.neighbors.compute_neighbors; ensure modularization applied correctly')
         return None, None
-
-    if X_or_coords is None:
-        print("No input provided to compute_neighbors")
-        return None, None
-
-    Xdense = _ensure_dense_for_embedding(X_or_coords, n_components_for_init=50)
-    if Xdense is None:
-        print("Unable to prepare input for nearest-neighbors")
-        return None, None
-
-    nn = NearestNeighbors(n_neighbors=min(n_neighbors, Xdense.shape[0]-1))
-    nn.fit(Xdense)
-    distances, indices = nn.kneighbors(Xdense)
-
-    Path(output_dir).mkdir(exist_ok=True)
-    np.save(f'{output_dir}/nn_indices.npy', indices)
-    np.save(f'{output_dir}/nn_distances.npy', distances)
-    print(f"Saved nearest-neighbor indices/distances to {output_dir}")
-    return indices, distances
+    return _compute(X_or_coords, n_neighbors=n_neighbors, output_dir=output_dir)
 
 
 def run_clustering(df, X_or_coords, config=CLUSTER_CONFIG, output_dir='artifacts'):
-    """Run clustering, add labels to df, and save results.
-
-    Supports 'kmeans' (sklearn) and 'hdbscan' (if installed).
-    Returns labels (numpy array) or None.
-    """
-    if X_or_coords is None:
-        print("No input provided to run_clustering")
+    """Compatibility wrapper that delegates to `src.processor.cluster.run_clustering`."""
+    try:
+        from src.processor.cluster import run_clustering as _run
+    except Exception:
+        print('Could not import src.processor.cluster.run_clustering; ensure modularization applied correctly')
         return None
-
-    Xdense = _ensure_dense_for_embedding(X_or_coords, n_components_for_init=50)
-    if Xdense is None:
-        print("Unable to prepare input for clustering")
-        return None
-
-    method = config.get('method', 'kmeans')
-    labels = None
-
-    if method == 'hdbscan':
-        if not HDBSCAN_AVAILABLE:
-            print("hdbscan not available; falling back to kmeans")
-            method = 'kmeans'
-        else:
-            try:
-                clusterer = hdbscan.HDBSCAN(min_cluster_size=config.get('min_cluster_size', 5))
-                labels = clusterer.fit_predict(Xdense)
-            except Exception as e:
-                print(f"hdbscan failed: {e}")
-                labels = None
-
-    if method == 'kmeans':
-        if not CLUSTERING_AVAILABLE:
-            print("sklearn KMeans not available install scikit-learn")
-            return None
-        n_clusters = config.get('n_clusters', 8)
-        try:
-            km = KMeans(n_clusters=n_clusters, random_state=42)
-            labels = km.fit_predict(Xdense)
-        except Exception as e:
-            print(f"KMeans failed: {e}")
-            labels = None
-
-    if labels is not None:
-        # attach to df
-        try:
-            df['cluster'] = labels.tolist()
-        except Exception:
-            df['cluster'] = list(labels)
-
-        Path(output_dir).mkdir(exist_ok=True)
-        np.save(f'{output_dir}/cluster_labels.npy', labels)
-        # update processed_data.csv if it exists in-memory df
-        try:
-            df.to_csv(f'{output_dir}/processed_data_with_clusters.csv', index=False)
-        except Exception:
-            pass
-
-        print(f"Saved cluster labels (method={method}) to {output_dir}/cluster_labels.npy")
-    else:
-        print("No cluster labels produced")
-
-    return labels
+    return _run(df, X_or_coords, config=config, output_dir=output_dir)
 
 
 
