@@ -1,0 +1,41 @@
+{
+  "variant": "minlen2",
+  "timestamp": "2025-11-10 16:16:00",
+  "runs": {
+    "pca": {
+      "trustworthiness_k5": 0.6023977535701962,
+      "knn_overlap_k10": 0.035949027498323266,
+      "n_points": 1491,
+      "cluster_separation": {
+        "mean_inter_centroid": 0.093695983711413,
+        "mean_within_cluster": 0.0680555692305661,
+        "separation_ratio": 1.376757035013589
+      }
+    },
+    "umap": {
+      "trustworthiness_k5": 0.8881943492829307,
+      "knn_overlap_k10": 0.27987927565392356,
+      "n_points": 1491,
+      "cluster_separation": {
+        "mean_inter_centroid": 3.9085354804992676,
+        "mean_within_cluster": 1.097353309392929,
+        "separation_ratio": 3.561784018911795
+      }
+    },
+    "tsne": {
+      "trustworthiness_k5": 0.9460429015993014,
+      "knn_overlap_k10": 0.3371562709590879,
+      "n_points": 1491,
+      "cluster_separation": {
+        "mean_inter_centroid": 25.4200496673584,
+        "mean_within_cluster": 18.11680805683136,
+        "separation_ratio": 1.403119665871372
+      }
+    }
+  },
+  "pairwise_knn_overlap": {
+    "pca_vs_umap": 0.033601609657947694,
+    "pca_vs_tsne": 0.03675385647216633,
+    "umap_vs_tsne": 0.370690811535882
+  }
+}
