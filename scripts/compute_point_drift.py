@@ -10,6 +10,7 @@ computes per-document L2 displacement. Outputs:
 Usage: python scripts/compute_point_drift.py
 """
 from pathlib import Path
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -65,13 +66,57 @@ def main():
         baseline = baseline[:n]
         run_coords = run_coords[:n]
 
-    # Load doc ids if available
+    # Load doc ids and optionally a human-friendly label column if available
     doc_ids_path = ART / 'doc_ids.txt'
     if doc_ids_path.exists():
         with open(str(doc_ids_path), 'r', encoding='utf-8') as f:
             doc_ids = [l.strip() for l in f.readlines()][:baseline.shape[0]]
     else:
         doc_ids = [str(i) for i in range(baseline.shape[0])]
+
+    # Choose label column: environment override LABEL_COL preferred, then try
+    # processed_data_with_clusters.csv and processed_data.csv for a descriptive column
+    LABEL_COL = os.environ.get('LABEL_COL', None)
+    labels = None
+    if LABEL_COL:
+        # user explicitly requested a label column
+        try:
+            df_art = pd.read_csv(ART / 'processed_data_with_clusters.csv')
+        except Exception:
+            try:
+                df_art = pd.read_csv(ART / 'processed_data.csv')
+            except Exception:
+                df_art = None
+        if df_art is not None and LABEL_COL in df_art.columns:
+            labels = df_art[LABEL_COL].astype(str).tolist()[:baseline.shape[0]]
+
+    if labels is None:
+        # try to pick a sensible default column
+        for candidate in ['Guideline + Slogan', 'Slogan', 'Full Guideline', 'Title', 'doc_id']:
+            try:
+                df_art = pd.read_csv(ART / 'processed_data_with_clusters.csv')
+            except Exception:
+                try:
+                    df_art = pd.read_csv(ART / 'processed_data.csv')
+                except Exception:
+                    df_art = None
+            if df_art is not None and candidate in df_art.columns:
+                labels = df_art[candidate].astype(str).tolist()[:baseline.shape[0]]
+                break
+
+    if labels is None:
+        # fallback to doc ids
+        labels = doc_ids
+
+    # helper to shorten long labels for plotting; length and top-K are configurable
+    SHORT_LEN = int(os.environ.get('LABEL_SHORT_LEN', 60))
+    TOP_K = int(os.environ.get('TOP_K', 20))
+
+    def _shorten(s, n=SHORT_LEN):
+        s = str(s)
+        return s if len(s) <= n else s[: n-1].rstrip() + '…'
+
+    labels = [_shorten(l) for l in labels]
 
     # Compute displacements
     diffs = run_coords - baseline
@@ -102,11 +147,18 @@ def main():
     cbar = fig.colorbar(sc, ax=ax)
     cbar.set_label('L2 displacement')
 
-    # highlight top movers
-    top_idx = np.argsort(displacements)[-20:]
+    # highlight top movers and annotate with human-friendly labels
+    top_idx = np.argsort(displacements)[-TOP_K:]
     ax.scatter(baseline[top_idx,0], baseline[top_idx,1], facecolors='none', edgecolors='red', s=50, linewidths=1.2)
+    # annotate as two-line label: doc_id on first line, short label on second
     for i in top_idx:
-        ax.text(baseline[i,0], baseline[i,1], str(doc_ids[i]), fontsize=6)
+        doc_label = doc_ids[i]
+        short_label = labels[i]
+        text = f"{doc_label}\n{short_label}"
+        # use annotate with small bbox to improve readability and slight offset
+        ax.annotate(text, (baseline[i,0], baseline[i,1]), fontsize=6, alpha=0.95,
+                    xytext=(3, 3), textcoords='offset points', ha='left', va='bottom',
+                    bbox=dict(boxstyle='round,pad=0.2', fc='white', alpha=0.7, linewidth=0.3))
 
     out_png = VIS / 'point_drift.png'
     fig.savefig(str(out_png), dpi=150, bbox_inches='tight')

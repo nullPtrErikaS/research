@@ -15,6 +15,7 @@ from src.processor import (
     setup_dirs,
     save_artifacts,
 )
+    import os
 
 if __name__ == '__main__':
     print('Running pipeline: setup -> preprocess -> tfidf -> pca -> plot')
@@ -37,20 +38,26 @@ if __name__ == '__main__':
         print('Dimensionality reduction produced coords with shape:', coords.shape)
         # derive default axis limits from SVD for optional reuse
         svd_limits = (coords[:,0].min(), coords[:,0].max(), coords[:,1].min(), coords[:,1].max())
-        plot_scatter(coords, df, filename='svd_scatter.png', title='SVD scatter', axis_limits=svd_limits)
+            # allow selecting distance metric via env var DIST_METRIC (default 'euclidean')
+            DIST_METRIC = os.environ.get('DIST_METRIC', 'euclidean')
+            print(f"Using distance metric: {DIST_METRIC}")
+            plot_scatter(coords, df, filename='svd_scatter.png', title='SVD scatter', axis_limits=svd_limits,
+                         label_col='Guideline + Slogan', annotate_top_n=12, metric=DIST_METRIC)
 
         # try additional embeddings if available
         coords_tsne = run_tsne(X)
         if coords_tsne is not None:
             tsne_limits = (coords_tsne[:,0].min(), coords_tsne[:,0].max(), coords_tsne[:,1].min(), coords_tsne[:,1].max())
-            plot_scatter(coords_tsne, df, filename='tsne_scatter.png', title='t-SNE scatter', axis_limits=tsne_limits)
+                plot_scatter(coords_tsne, df, filename='tsne_scatter.png', title='t-SNE scatter', axis_limits=tsne_limits,
+                             label_col='Guideline + Slogan', annotate_top_n=12, metric=DIST_METRIC)
             # also generate a density heatmap for t-SNE
             plot_heatmap(coords_tsne, filename='tsne_heatmap.png')
 
         coords_umap = run_umap(X)
         if coords_umap is not None:
             umap_limits = (coords_umap[:,0].min(), coords_umap[:,0].max(), coords_umap[:,1].min(), coords_umap[:,1].max())
-            plot_scatter(coords_umap, df, filename='umap_scatter.png', title='UMAP scatter', axis_limits=umap_limits)
+                plot_scatter(coords_umap, df, filename='umap_scatter.png', title='UMAP scatter', axis_limits=umap_limits,
+                             label_col='Guideline + Slogan', annotate_top_n=12, metric=DIST_METRIC)
             # and a density heatmap for UMAP
             plot_heatmap(coords_umap, filename='umap_heatmap.png')
 
@@ -65,6 +72,8 @@ if __name__ == '__main__':
 
         # compute nearest neighbors on SVD coords (or fallback to TF-IDF reduced)
         nn_idx, nn_dist = compute_neighbors(coords if coords is not None else X, n_neighbors=10)
+    nn_idx, nn_dist = compute_neighbors(coords if coords is not None else X, n_neighbors=10, metric=DIST_METRIC,
+                       algorithm='brute' if DIST_METRIC == 'cosine' else 'auto')
 
         # clustering on UMAP coords if available, else SVD coords
         cluster_input = coords_umap if coords_umap is not None else coords

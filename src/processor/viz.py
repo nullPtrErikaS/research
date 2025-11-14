@@ -12,7 +12,19 @@ except Exception:
     MATPLOTLIB_AVAILABLE = False
 
 
-def plot_scatter(coords, df, output_dir='visualizations', title='scatter', filename=None, axis_limits=None):
+def plot_scatter(coords, df, output_dir='visualizations', title='scatter', filename=None, axis_limits=None,
+                 label_col=None, annotate_top_n=10, metric=None):
+    """Plot 2D scatter of `coords` with optional labels taken from `df`.
+
+    label_col : str or None
+        Column name in `df` to use for point labels (e.g. 'Guideline + Slogan').
+        Falls back to 'doc_id' if not present. If None, no labels are used except
+        for the first `annotate_top_n` points.
+    annotate_top_n : int
+        Number of points to annotate with labels from `label_col` (default 10).
+    metric : str or None
+        Optional metric name to include in the output filename and printed title.
+    """
     if coords is None:
         print('No coords to plot')
         return
@@ -24,7 +36,11 @@ def plot_scatter(coords, df, output_dir='visualizations', title='scatter', filen
     plt.figure(figsize=(8, 6))
     x, y = coords[:, 0], coords[:, 1]
     plt.scatter(x, y, s=10, alpha=0.7)
-    plt.title(title)
+    # Make metric visible in title when provided
+    t = title
+    if metric:
+        t = f"{title} (metric={metric})"
+    plt.title(t)
     plt.xlabel('dim1')
     plt.ylabel('dim2')
     if axis_limits is not None:
@@ -32,11 +48,28 @@ def plot_scatter(coords, df, output_dir='visualizations', title='scatter', filen
         plt.xlim(xmin, xmax)
         plt.ylim(ymin, ymax)
 
-    for i, doc_id in enumerate(df['doc_id'].head(10)):
-        plt.annotate(doc_id, (x[i], y[i]), fontsize=6, alpha=0.8)
+    # Choose label column (fallback to doc_id)
+    if label_col is None:
+        label_col = 'doc_id'
+    if label_col not in df.columns:
+        # fallback
+        label_col = 'doc_id'
 
+    # Annotate first N points with human-friendly names (truncate long labels)
+    def _shorten(s, n=80):
+        s = str(s)
+        return s if len(s) <= n else s[: n-1].rstrip() + '…'
+
+    n_to_annotate = min(max(0, int(annotate_top_n)), coords.shape[0])
+    for i in range(n_to_annotate):
+        label = df.iloc[i].get(label_col, df.iloc[i].get('doc_id', str(i)))
+        label = _shorten(label, n=60)
+        plt.annotate(label, (x[i], y[i]), fontsize=6, alpha=0.9)
+
+    # Build output filename: if not provided, include metric when available
     if filename is None:
-        outpath = f'{output_dir}/scatter.png'
+        metric_tag = f'_{str(metric).replace(" ","_")}' if metric else ''
+        outpath = f'{output_dir}/scatter{metric_tag}.png'
     else:
         outpath = str(Path(output_dir) / filename)
     plt.tight_layout()

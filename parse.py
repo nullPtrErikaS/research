@@ -354,14 +354,21 @@ def run_pca(X, n_components=2, output_dir='artifacts'):
 # run_pca: quick 2D layout -> artifacts/coords.npy. fallback for neighbors/clusters.
 
 
-def plot_scatter(coords, df, output_dir='visualizations', title='PCA / SVD scatter', filename=None, axis_limits=None):
-    """Compatibility wrapper delegating to `src.processor.viz.plot_scatter`."""
+def plot_scatter(coords, df, output_dir='visualizations', title='PCA / SVD scatter', filename=None, axis_limits=None,
+                 label_col=None, annotate_top_n=10, metric=None):
+    """Compatibility wrapper delegating to `src.processor.viz.plot_scatter`.
+
+    Additional parameters `label_col`, `annotate_top_n`, and `metric` are
+    forwarded to the plotting helper to allow human-friendly labels and
+    metric visibility in filenames/titles.
+    """
     try:
         from src.processor.viz import plot_scatter as _plot
     except Exception:
         print('Could not import src.processor.viz.plot_scatter; ensure modularization applied correctly')
-        return
-    return _plot(coords, df, output_dir=output_dir, title=title, filename=filename, axis_limits=axis_limits)
+        return None
+    return _plot(coords, df, output_dir=output_dir, title=title, filename=filename, axis_limits=axis_limits,
+                 label_col=label_col, annotate_top_n=annotate_top_n, metric=metric)
 
 
 def plot_comparison(coords_a, coords_b, df, output_dir='visualizations', filename='tsne_vs_umap.png', titles=(
@@ -490,14 +497,17 @@ def run_umap(X, config=UMAP_CONFIG, output_dir='artifacts'):
     return _run(X, config=config, output_dir=output_dir)
 
 
-def compute_neighbors(X_or_coords, n_neighbors=10, output_dir='artifacts'):
-    """Compatibility wrapper that delegates to `src.processor.neighbors.compute_neighbors`."""
+def compute_neighbors(X_or_coords, n_neighbors=10, output_dir='artifacts', metric='euclidean', algorithm='auto'):
+    """Compatibility wrapper that delegates to `src.processor.neighbors.compute_neighbors`.
+
+    Parameters below are passed through to the implementation in `src.processor.neighbors`.
+    """
     try:
         from src.processor.neighbors import compute_neighbors as _compute
     except Exception:
         print('Could not import src.processor.neighbors.compute_neighbors; ensure modularization applied correctly')
         return None, None
-    return _compute(X_or_coords, n_neighbors=n_neighbors, output_dir=output_dir)
+    return _compute(X_or_coords, n_neighbors=n_neighbors, output_dir=output_dir, metric=metric, algorithm=algorithm)
 
 
 def run_clustering(df, X_or_coords, config=CLUSTER_CONFIG, output_dir='artifacts'):
