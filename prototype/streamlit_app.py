@@ -157,6 +157,13 @@ def update_selection(doc_ids, additive=False):
     if not isinstance(doc_ids, (list, tuple, set)):
         doc_ids = [doc_ids]
     current = list(st.session_state.get('selected_ids', []))
+    
+    # Save to history before changing
+    if current and current != st.session_state.get('selected_ids', []):
+        history = st.session_state.get('selection_history', [])
+        history.append(current)
+        st.session_state['selection_history'] = history[-10:]  # Keep last 10
+    
     if additive:
         base_seq = current + list(doc_ids)
     else:
@@ -209,7 +216,8 @@ def run_search(df_slice, query, scopes):
 # Locate data files in the repo (flexible)
 coords_tsne_path = find_file(['coords_tsne.npy', 'artifacts/coords_tsne.npy', 'artifacts/preproc_default/coords_tsne.npy'])
 coords_umap_path = find_file(['coords_umap.npy', 'artifacts/coords_umap.npy', 'artifacts/preproc_default/coords_umap.npy'])
-coords_pca_path = find_file(['coords.npy', 'artifacts/coords.npy', 'artifacts/preproc_default/coords.npy'])
+# Prefer preproc_default coords (full dataset) over a small summary file in artifacts
+coords_pca_path = find_file(['artifacts/preproc_default/coords.npy', 'artifacts/coords.npy', 'coords.npy'])
 cluster_labels_path = find_file(['cluster_labels.npy', 'artifacts/cluster_labels.npy', 'artifacts/preproc_default/cluster_labels.npy'])
 processed_csv_path = find_file(['processed_data_with_clusters.csv', 'artifacts/processed_data_with_clusters.csv', 'artifacts/preproc_default/processed_data_with_clusters.csv'])
 doc_ids_path = find_file(['doc_ids.txt', 'artifacts/doc_ids.txt', 'artifacts/preproc_default/doc_ids.txt'])
@@ -353,32 +361,128 @@ if coords_umap is None:
     coords_umap = PCA(n_components=2).fit_transform(base_embeddings + 0.01)
 
 
-def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols):
+def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, color_mode='Selection'):
     df_plot = df_plot.copy()
-    df_plot['__status'] = 'Other'
-    if search_ids:
-        df_plot.loc[df_plot['doc_id'].isin(search_ids), '__status'] = 'Search hit'
-    if selected_ids:
-        df_plot.loc[df_plot['doc_id'].isin(selected_ids), '__status'] = 'Selected'
-    color_map = {'Selected': '#d62728', 'Search hit': '#ffbf00', 'Other': '#b0b0b0'}
-    fig = px.scatter(
-        df_plot,
-        x=xcol,
-        y=ycol,
-        color='__status',
-        color_discrete_map=color_map,
-        hover_data=hover_cols,
-        height=450,
+    df_plot['__size'] = 8  # Default size
+    
+    if color_mode == 'Cluster':
+        # Color by cluster
+        if 'cluster' in df_plot.columns:
+            # Convert cluster to string to ensure it's treated as categorical
+            df_plot['cluster_str'] = df_plot['cluster'].astype(str)
+            color_col = 'cluster_str'
+        else:
+            # Fallback to status if no cluster column
+            df_plot['__status'] = 'Other'
+            color_col = '__status'
+        
+        # Make selected points larger
+        if selected_ids:
+            df_plot.loc[df_plot['doc_id'].isin(selected_ids), '__size'] = 14
+        if search_ids:
+            df_plot.loc[df_plot['doc_id'].isin(search_ids), '__size'] = 12
+        
+        fig = px.scatter(
+            df_plot,
+            x=xcol,
+            y=ycol,
+            color=color_col,
+            hover_name='doc_id',
+            hover_data=hover_cols,
+            color_discrete_sequence=px.colors.qualitative.Plotly,  # Use Plotly's default color palette
+            # No fixed height - let it be responsive
+        )
+    else:
+        # Color by selection status
+        df_plot['__status'] = 'Other'
+        
+        if search_ids:
+            df_plot.loc[df_plot['doc_id'].isin(search_ids), '__status'] = 'Search hit'
+            df_plot.loc[df_plot['doc_id'].isin(search_ids), '__size'] = 12
+        if selected_ids:
+            df_plot.loc[df_plot['doc_id'].isin(selected_ids), '__status'] = 'Selected'
+            df_plot.loc[df_plot['doc_id'].isin(selected_ids), '__size'] = 14
+        
+        # Improved color scheme
+        color_map = {
+            'Selected': '#FF4444',      # Bright red
+            'Search hit': '#FFD700',    # Gold
+            'Other': '#AAAAAA'          # Light gray
+        }
+        
+        fig = px.scatter(
+            df_plot,
+            x=xcol,
+            y=ycol,
+            color='__status',
+            color_discrete_map=color_map,
+            hover_name='doc_id',  # Show doc_id as the main title in hover
+            hover_data=hover_cols,
+            # No fixed height - let it be responsive
+            category_orders={'__status': ['Selected', 'Search hit', 'Other']}  # Legend order
+        )
+    
+    # Make hover text readable but not too large/intrusive
+    fig.update_layout(
+        hoverlabel=dict(
+            bgcolor="rgba(255, 255, 255, 0.9)",  # Slightly transparent
+            font_size=11,  # Smaller font
+            font_family="Arial, sans-serif",
+            font_color="black",
+            bordercolor="gray"
+        )
     )
+    
     # attach doc_id as customdata for robust mapping
     try:
         ids = df_plot['doc_id'].tolist()
-        for d in fig.data:
+        sizes = df_plot['__size'].tolist()
+        for idx, d in enumerate(fig.data):
             d.customdata = ids
+            # Set size based on status
+            if color_mode == 'Cluster':
+                # In cluster mode, apply sizes from dataframe
+                d.marker.size = sizes
+            else:
+                # In selection mode, set size based on trace name
+                status = d.name
+                if status == 'Selected':
+                    d.marker.size = 14
+                elif status == 'Search hit':
+                    d.marker.size = 12
+                else:
+                    d.marker.size = 8
+            d.marker.opacity = 1.0  # Full opacity for sharper edges
+            d.marker.line = dict(width=1.2, color='#000000')  # Thicker, darker border
     except Exception:
         pass
-    fig.update_traces(marker=dict(size=8), selector=dict(mode='markers'))
-    fig.update_layout(title=title, margin=dict(l=10, r=10, t=30, b=10))
+    
+    fig.update_layout(
+        title=dict(
+            text=title,
+            font=dict(size=14, family="Arial, sans-serif", color="#666666"),
+            x=0.5,
+            xanchor='center',
+            y=0.02,  # Position at bottom
+            yanchor='bottom'
+        ),
+        margin=dict(l=10, r=10, t=10, b=40),  # More space at bottom for title
+        dragmode=st.session_state.get('dragmode', 'lasso'),  # Use session state dragmode
+        clickmode='event+select',
+        hovermode='closest',  # Only show hover for closest point, not while selecting
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=0.98,  # Move legend to top since title is at bottom
+            xanchor="right",
+            x=1,
+            title=None
+        ),
+        xaxis=dict(showgrid=True, gridwidth=0.5, gridcolor='#E0E0E0'),
+        yaxis=dict(showgrid=True, gridwidth=0.5, gridcolor='#E0E0E0'),
+        autosize=True  # Enable responsive sizing
+    )
     return fig
 
 
@@ -389,6 +493,24 @@ if 'selected_ids' not in st.session_state:
     st.session_state['selected_ids'] = []
 if 'search_hits' not in st.session_state:
     st.session_state['search_hits'] = []
+if 'selection_history' not in st.session_state:
+    st.session_state['selection_history'] = []
+if 'dragmode' not in st.session_state:
+    st.session_state['dragmode'] = 'lasso'
+
+# Status indicators at the top
+col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+with col_stat1:
+    st.metric("Total Documents", len(df))
+with col_stat2:
+    st.metric("Selected", len(st.session_state['selected_ids']))
+with col_stat3:
+    search_count = len(st.session_state.get('search_hits', []))
+    st.metric("Search Hits", search_count if search_count > 0 else "—")
+with col_stat4:
+    cluster_count = df['cluster'].nunique() if 'cluster' in df.columns else 0
+    st.metric("Clusters", cluster_count if cluster_count > 0 else "—")
+
 if st.session_state.get('chunk_parent_map'):
     st.caption('Chunk ↔ parent linking is active: clicking either side will automatically highlight its counterpart(s).')
 
@@ -416,6 +538,13 @@ with st.sidebar:
             st.write('- ' + it)
         st.help('If you have a `doc_ids.txt` file, ensure it matches the ordering used to produce the .npy coordinate files. If not available, the app falls back to index-alignment which may mis-map documents across projections.')
 
+    st.subheader('Display Mode')
+    color_mode = st.radio(
+        'Color points by:',
+        options=['Selection', 'Cluster'],
+        help='Choose how to color the points in the scatter plots'
+    )
+    
     st.subheader('Search & filter')
     search_query = st.text_input('Search doc_id / keyword / phrase', '')
     search_scopes = st.multiselect('Search scopes', options=['doc_id', 'keywords', 'phrase'], default=['doc_id', 'phrase'])
@@ -459,8 +588,95 @@ with st.sidebar:
     multi_select = st.multiselect('Pin doc_ids (max 15)', options=doc_options, default=st.session_state['selected_ids'][:5], max_selections=15)
     if st.button('Apply pinned selection', key='btn_apply_multi'):
         update_selection(multi_select or [], additive=False)
-    if st.button('Clear selection', key='btn_clear_selection'):
-        update_selection([], additive=False)
+    
+    # Quick actions row
+    qcol1, qcol2, qcol3 = st.columns(3)
+    with qcol1:
+        if st.button('Clear', key='btn_clear_selection', use_container_width=True):
+            update_selection([], additive=False)
+    with qcol2:
+        if st.button('Undo', key='btn_undo', use_container_width=True, disabled=len(st.session_state.get('selection_history', [])) == 0):
+            history = st.session_state.get('selection_history', [])
+            if history:
+                st.session_state['selected_ids'] = history.pop()
+                st.session_state['selection_history'] = history
+                st.rerun()
+    with qcol3:
+        if st.button('Random', key='btn_random', use_container_width=True, help='Select 10 random points'):
+            import random
+            random_ids = random.sample(doc_options, min(10, len(doc_options)))
+            update_selection(random_ids, additive=False)
+    
+    # Brushing modes
+    qcol4, qcol5 = st.columns(2)
+    with qcol4:
+        if st.button('Invert', key='btn_invert', use_container_width=True, help='Invert current selection'):
+            all_ids = set(df_work['doc_id'].tolist())
+            current_ids = set(st.session_state['selected_ids'])
+            inverted = list(all_ids - current_ids)
+            update_selection(inverted, additive=False)
+    with qcol5:
+        box_select = st.checkbox('Box Select', value=False, help='Use box select instead of lasso')
+        if box_select:
+            st.session_state['dragmode'] = 'select'
+        else:
+            st.session_state['dragmode'] = 'lasso'
+    
+    # Additive selection mode
+    additive_mode = st.checkbox('Additive Selection', value=False, help='Add to selection instead of replacing (like holding Ctrl)')
+    if 'additive_mode' not in st.session_state:
+        st.session_state['additive_mode'] = False
+    st.session_state['additive_mode'] = additive_mode
+    
+    # Export selection
+    if st.session_state['selected_ids']:
+        import json
+        export_data = {
+            'selected_ids': st.session_state['selected_ids'],
+            'count': len(st.session_state['selected_ids']),
+            'timestamp': pd.Timestamp.now().isoformat()
+        }
+        st.download_button(
+            label='Export Selection (JSON)',
+            data=json.dumps(export_data, indent=2),
+            file_name='selected_docs.json',
+            mime='application/json',
+            use_container_width=True
+        )
+    
+    st.markdown('---')
+    st.subheader('Sessions')
+    # Save session
+    session_name = st.text_input('Session name', placeholder='my_analysis')
+    if st.button('Save Session', use_container_width=True):
+        if session_name:
+            import json
+            import os
+            session_data = {
+                'selected_ids': st.session_state['selected_ids'],
+                'search_query': search_query,
+                'cluster_filter': cluster_filter,
+                'color_mode': color_mode,
+                'timestamp': pd.Timestamp.now().isoformat()
+            }
+            os.makedirs('sessions', exist_ok=True)
+            with open(f'sessions/{session_name}.json', 'w') as f:
+                json.dump(session_data, f, indent=2)
+            st.success(f'Saved session: {session_name}')
+    
+    # Load session
+    import os
+    if os.path.exists('sessions'):
+        session_files = [f.replace('.json', '') for f in os.listdir('sessions') if f.endswith('.json')]
+        if session_files:
+            load_session = st.selectbox('Load session', options=[''] + session_files)
+            if st.button('Load Session', use_container_width=True) and load_session:
+                import json
+                with open(f'sessions/{load_session}.json', 'r') as f:
+                    session_data = json.load(f)
+                st.session_state['selected_ids'] = session_data.get('selected_ids', [])
+                st.success(f'Loaded session: {load_session}')
+                st.rerun()
 
     st.markdown('---')
     st.subheader('Chunk / Parent linking (optional)')
@@ -494,6 +710,11 @@ with st.sidebar:
     tsne_lr = st.slider('t-SNE learning rate', min_value=10, max_value=1000, value=200)
     recompute_previews = st.button('Recompute embedding previews')
     st.caption('Preview recompute runs locally. UMAP requires `umap-learn`; otherwise PCA fallbacks are used.')
+    
+    st.markdown('---')
+    st.subheader('Display options')
+    use_native_plotly = st.checkbox('Use native Plotly (disable plotly_events)', value=False, help='If plot points are invisible, use native rendering instead of the plotly_events wrapper.')
+    show_download_buttons = st.checkbox('Show plot download buttons', value=False, help='Enable PNG export for each plot')
 
 
 if recompute_previews:
@@ -536,6 +757,7 @@ if recompute_previews:
             st.session_state['tsne_coords_override'] = new_tsne
         if new_umap is not None:
             st.session_state['umap_coords_override'] = new_umap
+        st.rerun()
 
 
 coords_tsne = st.session_state.get('tsne_coords_override', coords_tsne)
@@ -565,25 +787,58 @@ if df_work.empty:
 df_work['__global_idx'] = df_work['doc_id'].map(doc_id_to_global_idx)
 
 # attach coordinates using global indices whenever possible
-def lookup_coords(arr, idx):
-    if arr is None or idx is None or pd.isna(idx):
+def lookup_coords(arr, idx, doc_id=None, local_idx=None):
+    """Robust coordinate lookup.
+
+    Tries several fallbacks so points still render when alignment files are missing
+    or partially mismatched:
+    1. Use provided global index `idx` if valid.
+    2. If that fails, try to look up by `doc_id` using `doc_id_to_global_idx`.
+    3. If that fails, try using `local_idx` (position in the filtered df_work).
+    4. Return (0.0, 0.0) as a last resort.
+    """
+    if arr is None:
         return 0.0, 0.0
-    try:
-        return float(arr[int(idx)][0]), float(arr[int(idx)][1])
-    except Exception:
+    # helper to read a 2d row safely
+    def _row_to_xy(r):
         try:
-            row = arr[int(idx)]
-            if len(row) >= 2:
-                return float(row[0]), float(row[1])
+            r = np.asarray(r)
+            if r.size >= 2:
+                return float(r[0]), float(r[1])
         except Exception:
-            return 0.0, 0.0
+            pass
+        return None
+
+    # try global index first
+    try:
+        if idx is not None and not pd.isna(idx):
+            cand = _row_to_xy(arr[int(idx)])
+            if cand:
+                return cand
+    except Exception:
+        pass
+
+    # try doc_id mapping
+    try:
+        if doc_id is not None:
+            mapped = doc_id_to_global_idx.get(str(doc_id))
+            if mapped is not None:
+                cand = _row_to_xy(arr[int(mapped)])
+                if cand:
+                    return cand
+    except Exception:
+        pass
+
+    # try local index into the array if it matches length or seems plausible
+    # (Removed dangerous fallback: local_idx in filtered df does not match global coords array)
+    
     return 0.0, 0.0
 
 
 tsne_x, tsne_y, umap_x, umap_y = [], [], [], []
-for gi in df_work['__global_idx'].tolist():
-    tx, ty = lookup_coords(coords_tsne, gi)
-    ux, uy = lookup_coords(coords_umap, gi)
+for local_idx, (gi, docid) in enumerate(zip(df_work['__global_idx'].tolist(), df_work['doc_id'].tolist())):
+    tx, ty = lookup_coords(coords_tsne, gi, doc_id=docid, local_idx=local_idx)
+    ux, uy = lookup_coords(coords_umap, gi, doc_id=docid, local_idx=local_idx)
     tsne_x.append(tx)
     tsne_y.append(ty)
     umap_x.append(ux)
@@ -593,6 +848,25 @@ df_work['tsne_x'] = tsne_x
 df_work['tsne_y'] = tsne_y
 df_work['umap_x'] = umap_x
 df_work['umap_y'] = umap_y
+
+# Diagnostic dump for running app (helps debug missing points in UI)
+try:
+    import json
+    diag = {
+        'n_points': len(df_work),
+        'tsne_x_min': float(np.min(tsne_x)) if tsne_x else None,
+        'tsne_x_max': float(np.max(tsne_x)) if tsne_x else None,
+        'tsne_y_min': float(np.min(tsne_y)) if tsne_y else None,
+        'tsne_y_max': float(np.max(tsne_y)) if tsne_y else None,
+        'umap_x_min': float(np.min(umap_x)) if umap_x else None,
+        'umap_x_max': float(np.max(umap_x)) if umap_x else None,
+        'umap_y_min': float(np.min(umap_y)) if umap_y else None,
+        'umap_y_max': float(np.max(umap_y)) if umap_y else None,
+    }
+    with open('artifacts/streamlit_diag.json', 'w', encoding='utf-8') as _f:
+        json.dump(diag, _f)
+except Exception:
+    pass
 
 
 embedding_dim = base_embeddings.shape[1] if base_embeddings.ndim > 1 else 1
@@ -631,17 +905,61 @@ except Exception:
 
 hover_cols = build_hover_columns(df_work)
 
+# Create index mapping for lookups (needed by heatmap and other features)
+id_to_local_idx = {doc_id: idx for idx, doc_id in enumerate(df_work['doc_id'].tolist())}
+
+# Build embeddings matrix for similarity calculations
+embedding_rows = []
+for gi in df_work['__global_idx'].tolist():
+    vec = lookup_embedding(gi)
+    if vec is None:
+        vec = np.zeros(embedding_dim)
+    embedding_rows.append(vec)
+embeddings_for_sim = np.vstack(embedding_rows) if embedding_rows else np.zeros((0, embedding_dim))
+
 if doc_a is None and not df_work.empty:
     doc_a = df_work.iloc[0]['doc_id']
 if doc_b is None and len(df_work) > 1:
     doc_b = df_work.iloc[1]['doc_id']
 
+# Display filter status
+st.markdown('---')
+filter_col1, filter_col2 = st.columns([3, 1])
+with filter_col1:
+    if len(df_work) < len(df):
+        st.info(f'Showing **{len(df_work):,}** of **{len(df):,}** documents after filters')
+    else:
+        st.success(f'Showing all **{len(df):,}** documents')
+with filter_col2:
+    if len(df_work) < len(df):
+        if st.button('Reset All Filters', use_container_width=True):
+            st.rerun()
+
+# Add helpful tooltips
+with st.expander('How to use this tool', expanded=False):
+    st.markdown('''
+    **Lasso Selection**: Click and drag to draw a selection shape around points
+    
+    **Additive Selection**: Check the "Additive Selection" box to add multiple lasso selections together
+    
+    **t-SNE**: Preserves local structure, good for finding clusters
+    
+    **UMAP**: Balances local and global structure, faster than t-SNE
+    
+    **PCA**: Linear projection, shows main variance directions
+    
+    **Tips**:
+    - Selected points appear in **red** and are larger
+    - Search hits appear in **gold**
+    - Use the sidebar to filter, search, and export selections
+    - Click "Undo" to restore previous selection
+    ''')
 
 col1, col2, col3 = st.columns([1,1,1])
 
 # render plots and capture selections via plotly_events
 with col1:
-    st.subheader('t-SNE')
+    st.markdown("### t-SNE Projection")
     fig_tsne = make_plot(
         df_work,
         'tsne_x',
@@ -650,14 +968,33 @@ with col1:
         st.session_state.get('search_hits', []),
         't-SNE',
         hover_cols,
+        color_mode
     )
-    ev_tsne = plotly_events(fig_tsne, click_event=True, select_event=True, key='tsne')
-    tsne_selected = extract_doc_ids_from_events(ev_tsne, df_work)
-    if tsne_selected:
-        update_selection(tsne_selected, additive=False)
+    if use_native_plotly:
+        st.plotly_chart(fig_tsne, use_container_width=True)
+        tsne_selected = []
+    else:
+        ev_tsne = plotly_events(fig_tsne, click_event=True, select_event=True, key='tsne')
+        tsne_selected = extract_doc_ids_from_events(ev_tsne, df_work)
+        if tsne_selected and len(tsne_selected) > 0:  # Only update if we actually got selections
+            update_selection(tsne_selected, additive=st.session_state.get('additive_mode', False))
+    # debug helper: optionally show the raw Plotly chart below the interactive wrapper
+    if show_download_buttons:
+        st.download_button(
+            label='Download t-SNE',
+            data=fig_tsne.to_html(),
+            file_name='tsne_plot.html',
+            mime='text/html',
+            use_container_width=True
+        )
+    try:
+        if st.sidebar.checkbox('Show raw t-SNE Plotly (debug)', value=False):
+            st.plotly_chart(fig_tsne, use_container_width=True)
+    except Exception:
+        pass
 
 with col2:
-    st.subheader('UMAP')
+    st.markdown("### UMAP Projection")
     fig_umap = make_plot(
         df_work,
         'umap_x',
@@ -666,14 +1003,32 @@ with col2:
         st.session_state.get('search_hits', []),
         'UMAP',
         hover_cols,
+        color_mode
     )
-    ev_umap = plotly_events(fig_umap, click_event=True, select_event=True, key='umap')
-    umap_selected = extract_doc_ids_from_events(ev_umap, df_work)
-    if umap_selected:
-        update_selection(umap_selected, additive=False)
+    if use_native_plotly:
+        st.plotly_chart(fig_umap, use_container_width=True)
+        umap_selected = []
+    else:
+        ev_umap = plotly_events(fig_umap, click_event=True, select_event=True, key='umap')
+        umap_selected = extract_doc_ids_from_events(ev_umap, df_work)
+        if umap_selected and len(umap_selected) > 0:  # Only update if we actually got selections
+            update_selection(umap_selected, additive=st.session_state.get('additive_mode', False))
+    if show_download_buttons:
+        st.download_button(
+            label='Download UMAP',
+            data=fig_umap.to_html(),
+            file_name='umap_plot.html',
+            mime='text/html',
+            use_container_width=True
+        )
+    try:
+        if st.sidebar.checkbox('Show raw UMAP Plotly (debug)', value=False):
+            st.plotly_chart(fig_umap, use_container_width=True)
+    except Exception:
+        pass
 
 with col3:
-    st.subheader('PCA')
+    st.markdown("### PCA Projection")
     fig_pca = make_plot(
         df_work,
         'pca_x',
@@ -682,16 +1037,136 @@ with col3:
         st.session_state.get('search_hits', []),
         'PCA (preview)',
         hover_cols,
+        color_mode
     )
-    ev_pca = plotly_events(fig_pca, click_event=True, select_event=True, key='pca')
-    pca_selected = extract_doc_ids_from_events(ev_pca, df_work)
-    if pca_selected:
-        update_selection(pca_selected, additive=False)
+    if use_native_plotly:
+        st.plotly_chart(fig_pca, use_container_width=True)
+        pca_selected = []
+    else:
+        ev_pca = plotly_events(fig_pca, click_event=True, select_event=True, key='pca')
+        pca_selected = extract_doc_ids_from_events(ev_pca, df_work)
+        if pca_selected and len(pca_selected) > 0:  # Only update if we actually got selections
+            update_selection(pca_selected, additive=st.session_state.get('additive_mode', False))
+    if show_download_buttons:
+        st.download_button(
+            label='Download PCA',
+            data=fig_pca.to_html(),
+            file_name='pca_plot.html',
+            mime='text/html',
+            use_container_width=True
+        )
+    try:
+        if st.sidebar.checkbox('Show raw PCA Plotly (debug)', value=False):
+            st.plotly_chart(fig_pca, use_container_width=True)
+    except Exception:
+        pass
+
+
 
 
 st.markdown('---')
+
+# Cluster Statistics
+if 'cluster' in df_work.columns and df_work['cluster'].nunique() > 0:
+    with st.expander('Cluster Statistics', expanded=False):
+        cluster_stats = df_work.groupby('cluster').agg({
+            'doc_id': 'count',
+            'tsne_x': ['mean', 'std'],
+            'tsne_y': ['mean', 'std']
+        }).round(2)
+        cluster_stats.columns = ['Count', 't-SNE X Mean', 't-SNE X Std', 't-SNE Y Mean', 't-SNE Y Std']
+        cluster_stats = cluster_stats.sort_values('Count', ascending=False)
+        st.dataframe(cluster_stats, use_container_width=True)
+        
+        # Quick cluster selection buttons
+        st.caption('Quick select cluster:')
+        cluster_cols = st.columns(min(5, len(cluster_stats)))
+        for idx, (cluster_id, row) in enumerate(cluster_stats.head(5).iterrows()):
+            with cluster_cols[idx]:
+                if st.button(f'Cluster {cluster_id} ({int(row["Count"])})', key=f'select_cluster_{cluster_id}', use_container_width=True):
+                    cluster_docs = df_work[df_work['cluster'] == cluster_id]['doc_id'].tolist()
+                    update_selection(cluster_docs, additive=False)
+
+# Distance Heatmap for Selected Points
+if len(st.session_state['selected_ids']) >= 2:
+    with st.expander('Distance Heatmap (Selected Points)', expanded=False):
+        selected_df = df_work[df_work['doc_id'].isin(st.session_state['selected_ids'])]
+        if len(selected_df) <= 100:  # Increased limit for larger heatmaps
+            selected_indices = [id_to_local_idx.get(doc_id) for doc_id in st.session_state['selected_ids'] if doc_id in id_to_local_idx]
+            selected_indices = [i for i in selected_indices if i is not None and i < len(embeddings_for_sim)]
+            
+            if len(selected_indices) >= 2:
+                selected_embeddings = embeddings_for_sim[selected_indices]
+                similarity_matrix = cosine_similarity(selected_embeddings)
+                
+                import plotly.graph_objects as go
+                fig_heatmap = go.Figure(data=go.Heatmap(
+                    z=similarity_matrix,
+                    x=[st.session_state['selected_ids'][i] for i in range(len(selected_indices))],
+                    y=[st.session_state['selected_ids'][i] for i in range(len(selected_indices))],
+                    colorscale='RdYlGn',
+                    zmid=0.5,
+                    text=similarity_matrix.round(3),
+                    texttemplate='%{text}',
+                    textfont={"size": 10},
+                    colorbar=dict(title="Cosine Similarity")
+                ))
+                fig_heatmap.update_layout(
+                    title='Pairwise Cosine Similarity',
+                    xaxis_title='Document ID',
+                    yaxis_title='Document ID',
+                    height=400
+                )
+                st.plotly_chart(fig_heatmap, use_container_width=True)
+        else:
+            st.info(f'Heatmap available for ≤100 selected points (currently {len(selected_df)} selected)')
+
+st.markdown('---')
 st.header('Comparison')
-id_to_local_idx = {doc_id: idx for idx, doc_id in enumerate(df_work['doc_id'].tolist())}
+# id_to_local_idx already defined above for heatmap use
+
+
+def render_selection_details(selected_ids):
+    st.markdown('---')
+    st.subheader('Selected Document Details')
+    
+    if not selected_ids:
+        st.info('Select points in the graphs above to see details here.')
+        return
+
+    # Filter dataframe for selected IDs
+    selected_df = df_work[df_work['doc_id'].isin(selected_ids)]
+    
+    if selected_df.empty:
+        st.warning('Selected IDs not found in current filtered dataset.')
+        return
+
+    st.write(f"**{len(selected_df)} document(s) selected**")
+
+    # If too many, just show a table
+    if len(selected_df) > 5:
+        st.dataframe(selected_df.drop(columns=[c for c in selected_df.columns if c.startswith('__')]))
+    else:
+        # Show detailed cards for a few items
+        cols = st.columns(len(selected_df))
+        for idx, (_, row) in enumerate(selected_df.iterrows()):
+            with cols[idx]:
+                st.markdown(f"### {row['doc_id']}")
+                st.caption(f"Cluster: {row.get('cluster', 'N/A')}")
+                st.write(row.get('__snippet', row.get('text', '')))
+                
+                # Display other metadata
+                meta_dict = {}
+                for col in row.index:
+                    if col not in ['doc_id', 'text', 'cluster', '__snippet'] and not col.startswith('__'):
+                        val = row[col]
+                        if not pd.isna(val) and str(val).strip():
+                            meta_dict[col] = val
+                
+                if meta_dict:
+                    st.json(meta_dict, expanded=False)
+
+render_selection_details(st.session_state['selected_ids'])
 
 
 def fetch_vector(doc_id):
