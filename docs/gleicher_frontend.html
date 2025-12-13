@@ -1,258 +1,783 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Directed Study Write-Up</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:wght@400;600&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --bg: #f8fafc;
-      --panel: #ffffff;
-      --text: #0f172a;
-      --muted: #475569;
-      --accent: #2563eb;
-      --border: #e2e8f0;
-      --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
-      background: radial-gradient(circle at 15% 20%, rgba(37, 99, 235, 0.06), transparent 26%),
-                  radial-gradient(circle at 80% 0%, rgba(59, 130, 246, 0.05), transparent 30%),
-                  var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      min-height: 100vh;
-    }
-    header {
-      padding: 48px 24px 20px;
-      max-width: 1080px;
-      margin: 0 auto;
-    }
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 12px;
-      border-radius: 999px;
-      background: #eef2ff;
-      color: #1d4ed8;
-      font-weight: 600;
-      font-size: 0.9rem;
-      border: 1px solid #dbeafe;
-    }
-    h1 {
-      margin: 16px 0 8px;
-      font-size: 2.2rem;
-      letter-spacing: -0.01em;
-    }
-    .lede {
-      max-width: 900px;
-      color: var(--muted);
-      font-size: 1.05rem;
-    }
-    nav.quick-links {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 18px;
-    }
-    nav.quick-links a {
-      text-decoration: none;
-      color: var(--text);
-      padding: 10px 14px;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      background: #fff;
-      transition: transform 140ms ease, border-color 140ms ease, color 140ms ease;
-      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
-    }
-    nav.quick-links a:hover {
-      transform: translateY(-1px);
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-    main {
-      max-width: 1080px;
-      margin: 0 auto;
-      padding: 0 24px 56px;
-      display: grid;
-      gap: 18px;
-    }
-    .section {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 20px 18px 18px;
-      box-shadow: var(--shadow);
-    }
-    .section h2 {
-      margin: 6px 0 10px;
-      font-size: 1.25rem;
-      letter-spacing: -0.01em;
-    }
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: #eff6ff;
-      border: 1px solid #dbeafe;
-      color: #1d4ed8;
-      font-size: 0.9rem;
-      font-weight: 600;
-    }
-    ul.clean {
-      margin: 0;
-      padding-left: 18px;
-      color: var(--text);
-    }
-    ul.clean li { margin-bottom: 8px; }
-    .grid { display: grid; gap: 12px; }
-    .grid.two { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-    .card {
-      padding: 14px;
-      border-radius: 12px;
-      background: #f8fafc;
-      border: 1px solid var(--border);
-      min-height: 100%;
-    }
-    .card h3 { margin: 0 0 6px; font-size: 1.05rem; }
-    .card p { margin: 0 0 8px; color: var(--muted); }
-    .muted { color: var(--muted); }
-    .meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
-    .meta { padding: 4px 8px; border-radius: 8px; border: 1px solid var(--border); background: #fff; color: var(--muted); font-size: 0.9rem; }
-    footer { max-width: 1080px; margin: 0 auto 32px; padding: 0 24px; color: var(--muted); font-size: 0.95rem; }
-    @media (max-width: 720px) {
-      header { padding: 38px 18px 16px; }
-      main { padding: 0 18px 44px; }
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Directed Study Write-Up: Short-Text Embedding Explorer</title>
+    <style>
+        :root {
+            --text: #2c3e50;
+            --text-light: #5a6a7a;
+            --heading: #1a252f;
+            --link: #2874a6;
+            --border: #dce1e6;
+            --bg-subtle: #f7f9fa;
+            --code-bg: #f4f6f8;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Georgia', 'Times New Roman', serif;
+            font-size: 16px;
+            line-height: 1.75;
+            color: var(--text);
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        /* Header */
+        header {
+            text-align: center;
+            padding-bottom: 2rem;
+            margin-bottom: 2rem;
+            border-bottom: 2px solid var(--border);
+        }
+
+        header h1 {
+            font-size: 1.8rem;
+            font-weight: normal;
+            color: var(--heading);
+            margin-bottom: 0.5rem;
+        }
+
+        header .subtitle {
+            font-size: 1.1rem;
+            color: var(--text-light);
+            font-style: italic;
+        }
+
+        header .meta {
+            font-size: 0.95rem;
+            color: var(--text-light);
+            margin-top: 0.5rem;
+        }
+
+        /* Navigation */
+        nav {
+            margin-bottom: 2.5rem;
+        }
+
+        nav p {
+            font-size: 0.9rem;
+            color: var(--text-light);
+        }
+
+        nav a {
+            color: var(--link);
+            text-decoration: none;
+        }
+
+        nav a:hover {
+            text-decoration: underline;
+        }
+
+        /* Sections */
+        section {
+            margin-bottom: 2.5rem;
+        }
+
+        h2 {
+            font-size: 1.4rem;
+            font-weight: normal;
+            color: var(--heading);
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        h3 {
+            font-size: 1.15rem;
+            font-weight: bold;
+            color: var(--heading);
+            margin: 1.75rem 0 0.75rem;
+        }
+
+        h4 {
+            font-size: 1rem;
+            font-weight: bold;
+            color: var(--text);
+            margin: 1.25rem 0 0.5rem;
+        }
+
+        p {
+            margin-bottom: 1rem;
+        }
+
+        /* Lists */
+        ul, ol {
+            margin: 1rem 0 1rem 1.5rem;
+        }
+
+        li {
+            margin-bottom: 0.4rem;
+        }
+
+        /* Code */
+        code {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 0.9em;
+            background: var(--code-bg);
+            padding: 0.15rem 0.35rem;
+            border-radius: 3px;
+        }
+
+        pre {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            padding: 1rem;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 1rem 0;
+            font-size: 0.85rem;
+            line-height: 1.5;
+        }
+
+        pre code {
+            background: none;
+            padding: 0;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1.25rem 0;
+            font-size: 0.95rem;
+        }
+
+        th, td {
+            padding: 0.6rem 0.75rem;
+            text-align: left;
+            border: 1px solid var(--border);
+        }
+
+        th {
+            background: var(--bg-subtle);
+            font-weight: bold;
+        }
+
+        /* Blockquotes for callouts */
+        blockquote {
+            margin: 1.25rem 0;
+            padding: 0.75rem 1rem;
+            border-left: 3px solid var(--border);
+            background: var(--bg-subtle);
+            font-size: 0.95rem;
+        }
+
+        blockquote strong {
+            display: block;
+            margin-bottom: 0.25rem;
+        }
+
+        /* File tree */
+        .file-tree {
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9rem;
+            background: var(--bg-subtle);
+            padding: 1rem;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            margin: 1rem 0;
+        }
+
+        .file-tree ul {
+            list-style: none;
+            margin: 0;
+            padding-left: 1.25rem;
+        }
+
+        .file-tree > ul {
+            padding-left: 0;
+        }
+
+        .file-tree li {
+            margin: 0.2rem 0;
+        }
+
+        .comment {
+            color: var(--text-light);
+            font-style: italic;
+        }
+
+        /* Bibliography */
+        .bib-entry {
+            margin-bottom: 1.25rem;
+            padding-left: 1rem;
+            border-left: 2px solid var(--border);
+        }
+
+        .bib-entry .title {
+            font-weight: bold;
+        }
+
+        .bib-entry .authors {
+            font-size: 0.9rem;
+            color: var(--text-light);
+            margin-bottom: 0.25rem;
+        }
+
+        .bib-entry .annotation {
+            font-size: 0.95rem;
+        }
+
+        /* Links */
+        a {
+            color: var(--link);
+        }
+
+        /* Footer */
+        footer {
+            margin-top: 3rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border);
+            text-align: center;
+            font-size: 0.9rem;
+            color: var(--text-light);
+        }
+
+        /* Print styles */
+        @media print {
+            body {
+                padding: 0;
+                font-size: 11pt;
+            }
+            
+            nav {
+                display: none;
+            }
+        }
+    </style>
 </head>
 <body>
-  <header>
-    <div class="eyebrow">Directed Study Write-Up</div>
-    <h1>Short-Text Embedding Explorer</h1>
-    <p class="lede">Final write-up for the Streamlit-based embedding explorer, covering results, process, lessons learned, and handoff details. Built around TF-IDF + PCA/UMAP/t-SNE pipelines with linked selection, search, and clustering analysis.</p>
-    <nav class="quick-links">
-      <a href="#overview">Overview</a>
-      <a href="#results">Results</a>
-      <a href="#work">Work done</a>
-      <a href="#learning">What I learned</a>
-      <a href="#self">Self-eval</a>
-      <a href="#deliverables">Deliverables</a>
+    <header>
+        <h1>Short-Text Embedding Explorer</h1>
+        <p class="subtitle">Directed Study Final Write-Up</p>
+        <p class="meta">CS 699 · Fall 2025 · Advisor: Michael Gleicher · Mentor: Cat Nelson</p>
+    </header>
+
+    <nav>
+        <p><strong>Contents:</strong> 
+            <a href="#overview">Overview</a> · 
+            <a href="#results">Results</a> · 
+            <a href="#figures">Figures</a> · 
+            <a href="#process">Process</a> · 
+            <a href="#learned">What I Learned</a> · 
+            <a href="#evaluation">Self-Evaluation</a> · 
+            <a href="#deliverables">Deliverables</a> · 
+            <a href="#bibliography">Bibliography</a> · 
+            <a href="#quickstart">Quick Start</a>
+        </p>
     </nav>
-  </header>
 
-  <main>
-    <section id="overview" class="section">
-      <div class="pill">Project summary</div>
-      <h2>What this project is</h2>
-      <ul class="clean">
-        <li>Interactive Streamlit explorer for short-text embeddings with linked selections across PCA, t-SNE, and UMAP.</li>
-        <li>Pipeline: clean text → TF-IDF → dimensionality reduction → neighbors/clustering → metrics + plots.</li>
-        <li>Goal: quickly inspect cluster coherence, neighborhood structure, and drift across preprocessing variants.</li>
-        <li>Status: stable explorer with selection/undo, search/filter, comparison panel, and export of selections.</li>
-      </ul>
-    </section>
+    <main>
+        <!-- Overview Section -->
+        <section id="overview">
+            <h2>1. Project Overview</h2>
+            
+            <p>This project delivers an interactive Streamlit-based explorer for analyzing short-text embeddings. The tool enables researchers to quickly inspect cluster coherence, neighborhood structure, and projection quality across different dimensionality reduction techniques (PCA, t-SNE, UMAP) and preprocessing variants.</p>
 
-    <section id="results" class="section">
-      <div class="pill">Results</div>
-      <h2>What I built and validated</h2>
-      <div class="grid two">
-        <div class="card">
-          <h3>Explorer</h3>
-          <p>Linked brushing across PCA, t-SNE, UMAP; hover snippets; cluster filters; doc/keyword search; two-document comparison with cosine/Euclid metrics and neighbor tables; selection history + undo; export selected doc_ids as JSON.</p>
-          <div class="meta-row">
-            <span class="meta">Stable selection mapping</span>
-            <span class="meta">Hover + tooltips</span>
-            <span class="meta">Cluster filters</span>
-          </div>
-        </div>
-        <div class="card">
-          <h3>Pipeline + artifacts</h3>
-          <p>Reusable TF-IDF pipeline with PCA/t-SNE/UMAP outputs, cluster labels, neighbor indices/distances, and processed CSV. Artifacts saved per run for reproducibility.</p>
-          <div class="meta-row">
-            <span class="meta">TF-IDF (ngrams)</span>
-            <span class="meta">PCA/UMAP/t-SNE</span>
-            <span class="meta">HDBSCAN/KMeans</span>
-          </div>
-        </div>
-        <div class="card">
-          <h3>Validation & tests</h3>
-          <p>Numeric regression and reproducibility smoke tests with fixed RNGs; stability runs; distance metric consistency checks; artifact validation checklist (counts, alignment, dimensionality).</p>
-          <div class="meta-row">
-            <span class="meta">Regression tests</span>
-            <span class="meta">Repro seeds</span>
-            <span class="meta">Alignment checks</span>
-          </div>
-        </div>
-        <div class="card">
-          <h3>UI polish</h3>
-          <p>Default lasso mode, clearer color/legend, larger selected points, filter status indicators, comparison panel hooked to stored neighbors, small parameter panel for previewing reductions.</p>
-          <div class="meta-row">
-            <span class="meta">Lasso default</span>
-            <span class="meta">Undo/redo</span>
-            <span class="meta">Param tweaks</span>
-          </div>
-        </div>
-      </div>
-    </section>
+            <h3>What This Project Is</h3>
+            <p>The Short-Text Embedding Explorer is a visualization and analysis tool built around a modular pipeline: clean text → TF-IDF vectorization → dimensionality reduction → neighbors/clustering → metrics and interactive plots.</p>
 
-    <section id="work" class="section">
-      <div class="pill">Process</div>
-      <h2>What I did</h2>
-      <ul class="clean">
-        <li>Fixed missing points in plots (removed stray shell text in Python) and repaired doc_id ↔ coordinate alignment to eliminate mismatched highlights.</li>
-        <li>Rebuilt PCA layer to use refreshed numpy exports; added artifact loader for bundle switching without manual path edits.</li>
-        <li>Hooked comparison panel to stored neighbor lists; added selection history/undo; made lasso the default drag mode.</li>
-        <li>Added export of selections, cluster stats, similarity heatmap (guarded for size), and filter/search recentering.</li>
-        <li>Wrote regression, reproducibility, and stability tests; added distance metric validation and artifact sanity checks.</li>
-        <li>Generated new visualizations (PCA/UMAP/t-SNE + heatmaps) and documented validation checklist.</li>
-      </ul>
-    </section>
+            <p>The explorer provides linked selections across all projection views, meaning a click or lasso selection in one embedding view immediately highlights the corresponding documents in all other views. This enables rapid comparison of how different algorithms structure the same data.</p>
 
-    <section id="learning" class="section">
-      <div class="pill">What I learned</div>
-      <h2>Key takeaways</h2>
-      <ul class="clean">
-        <li>Index alignment is the linchpin: doc_id → coord mappings must stay consistent across all .npy exports or interactions break.</li>
-        <li>UMAP/t-SNE require careful seeding and config when comparing runs; PCA provides a stable fallback for alignment checks.</li>
-        <li>Interaction reliability (selection, undo, hover) matters more than adding new widgets—stability first, then features.</li>
-        <li>Regression baselines and quick stability runs catch silent drift early; small checklists prevent bad artifact bundles from shipping.</li>
-      </ul>
-    </section>
+            <h3>Project Goals</h3>
+            <ul>
+                <li>Build a reproducible framework for evaluating short-text embedding quality</li>
+                <li>Enable systematic comparison of PCA, t-SNE, and UMAP projections on the same dataset</li>
+                <li>Support exploratory analysis workflows with selection, search, filtering, and export</li>
+                <li>Create a stable foundation for future research on text visualization design guidelines</li>
+            </ul>
 
-    <section id="self" class="section">
-      <div class="pill">Self-evaluation</div>
-      <h2>Reflection</h2>
-      <ul class="clean">
-        <li>Proud of the stabilized explorer and test coverage; the tool is now usable for real analysis and demos.</li>
-        <li>Would start earlier on alignment validation and automated artifact checks to avoid late-cycle debugging.</li>
-        <li>Next time: add lightweight state persistence (selection/search) across reloads and automate bundle selection via CLI.</li>
-      </ul>
-    </section>
+            <h3>Current Status</h3>
+            <p>The explorer is stable and usable for real analysis. Core functionality includes linked brushing, selection history with undo, document search and filtering, cluster statistics, two-document comparison panels, and export of selected document IDs. The artifact pipeline produces consistent, validated outputs that can be loaded via a simple bundle selector.</p>
+        </section>
 
-    <section id="deliverables" class="section">
-      <div class="pill">Code & assets</div>
-      <h2>Where to find things</h2>
-      <ul class="clean">
-        <li>Source: main repo (pipelines + Streamlit explorer). Entry points: <code>scripts/run_all.py</code>, <code>prototype/streamlit_app.py</code>.</li>
-        <li>Artifacts: <code>artifacts/</code> (coords, clusters, neighbors, metrics); variant bundles under <code>artifacts/preproc_*/</code> and <code>artifacts/newsgroups/</code>.</li>
-        <li>Visuals: <code>visualizations/</code> and <code>visualizations_test/</code> PNGs (PCA, UMAP, t-SNE, heatmaps).</li>
-        <li>Tests: <code>tests/</code> (regression, reproducibility, stability, metric consistency).</li>
-        <li>Docs: this page plus <code>docs/TESTING.md</code>; Streamlit usage via <code>streamlit run prototype/streamlit_app.py</code>.</li>
-      </ul>
-    </section>
-  </main>
+        <!-- Results Section -->
+        <section id="results">
+            <h2>2. Results</h2>
+            
+            <p>The project produced a working interactive explorer and a validated artifact pipeline. This section describes what was built, how it was validated, and what it enables.</p>
 
-  <footer>
-    Directed study write-up — distilled from project work and weekly status notes. Keep artifacts and alignment checks intact for future iterations.
-  </footer>
+            <h3>Explorer Features</h3>
+            
+            <p>The Streamlit explorer includes the following capabilities:</p>
+            
+            <ul>
+                <li><strong>Linked brushing:</strong> Selections sync across PCA, t-SNE, and UMAP views in real time</li>
+                <li><strong>Hover tooltips:</strong> Document ID, text snippet, and metadata on hover</li>
+                <li><strong>Search and filter:</strong> Search by doc_id, keyword, or phrase; filter by cluster or metadata</li>
+                <li><strong>Selection history:</strong> Undo/redo selections without losing exploration context</li>
+                <li><strong>Comparison panel:</strong> Side-by-side documents with cosine/Euclidean metrics and neighbor tables</li>
+                <li><strong>Export:</strong> Download selected doc_ids as JSON for downstream analysis</li>
+                <li><strong>Cluster statistics:</strong> Quick-select buttons and summary stats per cluster</li>
+                <li><strong>Similarity heatmap:</strong> Cosine similarity matrix for selected points (size-guarded to prevent performance issues)</li>
+            </ul>
+
+            <h3>Pipeline and Artifacts</h3>
+            
+            <p>The pipeline produces a consistent set of artifacts for each preprocessing configuration:</p>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Artifact</th>
+                        <th>Format</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>tfidf_matrix.npz</code></td>
+                        <td>Sparse matrix</td>
+                        <td>TF-IDF vectors (configurable n-grams)</td>
+                    </tr>
+                    <tr>
+                        <td><code>tfidf_vectorizer.pkl</code> / <code>vocabulary.pkl</code></td>
+                        <td>Pickle</td>
+                        <td>Vectorizer and vocabulary for reproducible transforms</td>
+                    </tr>
+                    <tr>
+                        <td><code>coords.npy</code></td>
+                        <td>NumPy array</td>
+                        <td>PCA coordinates (2D)</td>
+                    </tr>
+                    <tr>
+                        <td><code>coords_tsne.npy</code></td>
+                        <td>NumPy array</td>
+                        <td>t-SNE coordinates (2D)</td>
+                    </tr>
+                    <tr>
+                        <td><code>coords_umap.npy</code></td>
+                        <td>NumPy array</td>
+                        <td>UMAP coordinates (2D)</td>
+                    </tr>
+                    <tr>
+                        <td><code>nn_indices.npy</code> / <code>nn_distances.npy</code></td>
+                        <td>NumPy array</td>
+                        <td>Nearest-neighbor indices and distances</td>
+                    </tr>
+                    <tr>
+                        <td><code>cluster_labels.npy</code></td>
+                        <td>NumPy array</td>
+                        <td>Cluster assignments</td>
+                    </tr>
+                    <tr>
+                        <td><code>processed_data_with_clusters.csv</code></td>
+                        <td>CSV</td>
+                        <td>Cleaned text, doc_id, metadata, and cluster labels</td>
+                    </tr>
+                    <tr>
+                        <td><code>metrics.json</code> / <code>config.json</code></td>
+                        <td>JSON</td>
+                        <td>Evaluation metrics and run configuration snapshot</td>
+                    </tr>
+                    <tr>
+                        <td><code>doc_ids.txt</code></td>
+                        <td>Text</td>
+                        <td>Stable document identifiers, one per line</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <p>Artifact bundles are saved per run under <code>artifacts/</code>, with variant configurations (e.g., <code>preproc_no_stopwords/</code>) stored in separate subdirectories. A bundle selector in the Streamlit UI allows switching between configurations without manual path editing.</p>
+
+            <h3>Validation and Testing</h3>
+
+            <p>The project includes a test suite to catch regressions and ensure reproducibility:</p>
+
+            <ul>
+                <li><strong>Numeric regression tests:</strong> Baseline JSON files with tolerance thresholds detect metric drift across runs.</li>
+                <li><strong>Reproducibility smoke tests:</strong> Fixed RNG seeds verify that identical inputs produce identical outputs.</li>
+                <li><strong>Stability tests:</strong> 10 repeated runs measure variance and timing consistency.</li>
+                <li><strong>Distance metric validation:</strong> Ensures cosine vs. Euclidean configurations remain consistent.</li>
+                <li><strong>Artifact validation checklist:</strong> Verifies row counts, alignment, and dimensionality across all <code>.npy</code> files before loading.</li>
+            </ul>
+
+            <blockquote>
+                <strong>Validation in practice:</strong> The artifact checklist caught two stale bundles with mismatched row counts before they caused silent selection bugs in the explorer. This kind of early detection is exactly what the validation infrastructure was designed for.
+            </blockquote>
+        </section>
+
+        <!-- Figures Section -->
+        <section id="figures">
+            <h2>Figures</h2>
+            <p>Representative plots generated from the pipeline. Files live in <code>visualizations/</code> (and <code>visualizations_test/</code> for comparisons). When served from GitHub Pages, use paths like <code>../visualizations/…</code>.</p>
+            <ul>
+                <li>PCA/SVD scatter: <code>visualizations/svd_scatter.png</code></li>
+                <li>t-SNE scatter: <code>visualizations/tsne_scatter.png</code></li>
+                <li>t-SNE heatmap: <code>visualizations/tsne_heatmap.png</code></li>
+                <li>UMAP scatter: <code>visualizations/umap_scatter.png</code></li>
+                <li>UMAP heatmap: <code>visualizations/umap_heatmap.png</code></li>
+                <li>t-SNE vs UMAP comparison: <code>visualizations/tsne_vs_umap.png</code></li>
+                <li>Point drift: <code>visualizations/point_drift.png</code></li>
+            </ul>
+            <div style="display:grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin-top:12px;">
+                <div><img src="../visualizations/svd_scatter.png" alt="PCA/SVD scatter" style="width:100%; border:1px solid var(--border); border-radius:6px;"></div>
+                <div><img src="../visualizations/tsne_scatter.png" alt="t-SNE scatter" style="width:100%; border:1px solid var(--border); border-radius:6px;"></div>
+                <div><img src="../visualizations/umap_scatter.png" alt="UMAP scatter" style="width:100%; border:1px solid var(--border); border-radius:6px;"></div>
+                <div><img src="../visualizations/tsne_vs_umap.png" alt="t-SNE vs UMAP comparison" style="width:100%; border:1px solid var(--border); border-radius:6px;"></div>
+            </div>
+        </section>
+
+        <!-- Process Section -->
+        <section id="process">
+            <h2>3. Process</h2>
+
+            <p>This section documents the work that went into the project, including the timeline, major tasks, and things that didn't work as expected.</p>
+
+            <h3>Where Time Went</h3>
+
+            <p>Based on weekly status reports, time was distributed across several categories. The largest chunks went to interaction logic—getting selections, linked brushing, and undo to work reliably across views took multiple weeks and repeated debugging. The testing infrastructure (regression tests, reproducibility checks, stability runs) also required significant investment, particularly integrating tests with the existing evaluation code. Earlier weeks included ramp-up time spent reading papers, exploring the AbstractsViewer codebase, and learning the dimensionality reduction tools.</p>
+            
+            <p>Specific tasks from status reports:</p>
+            <ul>
+                <li>Fixing points not rendering + alignment bugs: ~5.5 hours (but revealed deeper issues)</li>
+                <li>Selection interactions, lasso, undo: ~3 hours</li>
+                <li>Analysis/export features (metrics, heatmap, JSON export): ~3 hours</li>
+                <li>UI polish and bug fixes: ~2.5 hours</li>
+                <li>PCA rebuild + artifact loader: ~5.5 hours</li>
+                <li>Comparison panel + neighbor lists: ~2 hours</li>
+                <li>Artifact validation checklist: ~2.5 hours</li>
+                <li>Linked brushing implementation: ~6.5 hours</li>
+                <li>Hover tooltips, search, filters: ~4 hours</li>
+                <li>Regression/reproducibility/stability tests: ~10 hours</li>
+                <li>Distance metric validation: ~2 hours</li>
+                <li>Pipeline expansion and measurement routines: ~10 hours</li>
+                <li>Reading and ramp-up (papers, documentation, existing codebases): ~15+ hours across early weeks</li>
+            </ul>
+
+            <h3>Development Timeline</h3>
+
+            <p><strong>Phase 1: Pipeline Foundation (Weeks 1–3).</strong> Set up preprocessing pipeline with tokenization, stopword removal, and lemmatization. Built TF-IDF matrix generation and initial PCA scatterplot. Read foundational papers on UMAP and t-SNE.</p>
+
+            <p><strong>Phase 2: Dimensionality Reduction Comparison (Weeks 4–5).</strong> Implemented t-SNE and UMAP projections. Compared neighborhood consistency across methods. Began modularizing the codebase into <code>src/processor</code> package structure.</p>
+
+            <p><strong>Phase 3: Interactive Explorer (Weeks 6–8).</strong> Built Streamlit explorer with linked brushing across all three projection views. Added hover tooltips, search, filtering, and the two-document comparison panel. Debugged index alignment issues extensively.</p>
+
+            <p><strong>Phase 4: Stabilization and Testing (Weeks 9–11).</strong> Fixed the alignment bug that caused selection mismatches. Added selection history/undo. Implemented regression, reproducibility, and stability tests. Created artifact validation checklist.</p>
+
+            <p><strong>Phase 5: Polish and Documentation (Weeks 12–14).</strong> Added artifact bundle loader with dropdown switching. Hooked comparison panel to stored neighbor lists. UI polish (lasso default, colors, legends). Wrote documentation and this writeup.</p>
+
+            <h3>What Didn't Work</h3>
+
+            <p>Not everything went smoothly. Here are the significant dead ends and bugs that shaped the project:</p>
+
+            <p><strong>Unsafe fallback logic.</strong> The initial coordinate lookup code had a fallback path that used local filtered indices to index into global coordinate arrays. This caused silent misalignment: hovering over a point in one view would highlight a completely different document in another view. The fix was to remove the fallback entirely and always resolve coordinates via <code>doc_id</code> mappings. This took approximately 2.5 hours to diagnose and 1 hour to fix, after initially estimating 30 minutes.</p>
+
+            <p><strong>Shell commands in Python source.</strong> At one point, shell commands were accidentally pasted into the Python plotting code. The code still ran (Python doesn't fail on unreachable statements after a return), but the plotting logic was never executed. Points simply didn't appear. This took approximately 3 hours to track down because the error was silent. A linter would have caught this instantly.</p>
+
+            <p><strong>Stale artifact bundles.</strong> Early in development, I generated multiple artifact bundles with different preprocessing options but didn't verify that all files had matching row counts. Two bundles had TF-IDF matrices with different numbers of documents than their coordinate files. The artifact validation checklist was created specifically to prevent this from happening again.</p>
+
+            <p><strong>UMAP reproducibility.</strong> UMAP results varied between runs even with the same input data, which made debugging difficult. The fix was to explicitly set the <code>random_state</code> parameter and use <code>n_jobs=1</code> to disable parallelism during testing.</p>
+
+            <p>The general pattern across the semester: interaction logic and debugging consistently took longer than anticipated, while additive features (new panels, new exports) were more predictable. Tasks involving shared state or cross-component coordination expanded in scope once implementation began.</p>
+        </section>
+
+        <!-- What I Learned Section -->
+        <section id="learned">
+            <h2>4. What I Learned</h2>
+
+            <p>This section documents the technical and non-technical lessons from the project.</p>
+
+            <h3>Technical Lessons</h3>
+
+            <h4>Index alignment is the linchpin</h4>
+            <p>Every interaction in the explorer—selection, hover, search, comparison—depends on the assumption that row <em>i</em> in <code>coords.npy</code> corresponds to row <em>i</em> in <code>coords_tsne.npy</code>, <code>coords_umap.npy</code>, <code>cluster_labels.npy</code>, and <code>processed_docs.csv</code>. Any mismatch breaks everything silently. The solution is to always generate all artifacts in a single pipeline run, use <code>doc_id</code> as the canonical key (never positional indices), and validate alignment before loading.</p>
+
+            <h4>Reproducibility requires explicit infrastructure</h4>
+            <p>UMAP and t-SNE are stochastic algorithms. Without fixed random seeds and controlled parallelism, results vary between runs. This makes debugging nearly impossible because you can't tell if a change in output is due to your code change or random variation. The reproducibility smoke tests exist specifically to catch this.</p>
+
+            <h4>Interaction reliability matters more than feature count</h4>
+            <p>I spent roughly 6 hours on selection/undo/lasso polish vs. 2 hours on the parameter preview panel. The former made the tool usable for real exploration; the latter was nice-to-have. Prioritizing interaction reliability over feature breadth was the right call.</p>
+
+            <h4>PCA as stable baseline</h4>
+            <p>Unlike t-SNE and UMAP, PCA is deterministic and fast. This makes it invaluable for debugging: if something looks wrong in all three views, the bug is in shared code; if it's only wrong in t-SNE/UMAP, the bug is in those pipelines or their configurations.</p>
+
+            <h4>Regression baselines catch silent drift</h4>
+            <p>Small changes to preprocessing (e.g., changing the n-gram range) can propagate through the entire pipeline and change clustering results. Without regression tests that compare against known baselines, these changes go unnoticed until someone manually inspects the output.</p>
+
+            <h3>Non-Technical Lessons</h3>
+
+            <h4>Status reports are future-you documentation</h4>
+            <p>The weekly status reports turned out to be invaluable for writing this document. The "why are 1 and 2 different" sections captured context that I would have completely forgotten otherwise.</p>
+
+            <h4>Debugging time is unpredictable</h4>
+            <p>Features that "should" take an hour can take a full day if they touch shared state or involve coordination between components. The safest assumption is 3–4× the naive estimate for anything interactive.</p>
+
+            <h4>Validation checklists prevent repeat mistakes</h4>
+            <p>After catching the stale bundle bug, I wrote a checklist and used it every time I generated new artifacts. This took maybe 5 minutes per run but saved hours of potential debugging.</p>
+
+            <h4>Connect engineering to goals</h4>
+            <p>Early status reports focused on engineering details (test coverage, CI integration) without explaining why they mattered. The feedback to connect details to project goals was valuable: every engineering investment should trace back to enabling better analysis or more reliable results.</p>
+        </section>
+
+        <!-- Self-Evaluation Section -->
+        <section id="evaluation">
+            <h2>5. Self-Evaluation</h2>
+
+            <h3>What Went Well</h3>
+            <ul>
+                <li><strong>The explorer works.</strong> It's stable enough for real analysis and demos. Linked selection, search, and comparison all function correctly.</li>
+                <li><strong>Test coverage is solid.</strong> Regression, reproducibility, and stability tests exist and run. The artifact validation checklist has already caught bugs.</li>
+                <li><strong>The codebase is modular.</strong> The refactor into <code>src/processor</code> makes it possible to swap components (e.g., different vectorizers) without rewriting everything.</li>
+                <li><strong>Documentation exists.</strong> <code>docs/TESTING.md</code>, this writeup, and inline comments make it possible for someone else to pick up the project.</li>
+            </ul>
+
+            <h3>What Could Be Better</h3>
+            <ul>
+                <li><strong>No state persistence.</strong> Switching artifact bundles or reloading the page clears all selection and search state. This interrupts exploratory workflows.</li>
+                <li><strong>Manual bundle selection.</strong> The CLI doesn't yet support specifying an artifact bundle; you have to use the Streamlit dropdown or edit paths.</li>
+                <li><strong>Tests aren't in CI.</strong> The test suite runs locally but isn't integrated into GitHub Actions. This means tests can drift out of date.</li>
+                <li><strong>Limited to TF-IDF.</strong> The pipeline uses TF-IDF for vectorization. More sophisticated embeddings (sentence transformers, etc.) would enable better semantic comparisons.</li>
+            </ul>
+
+            <h3>What I Would Do Differently</h3>
+            <ul>
+                <li><strong>Start with alignment validation.</strong> I would implement the artifact checklist in week 1, not week 10. Most of the painful debugging came from alignment issues that could have been caught earlier.</li>
+                <li><strong>Add a linter and basic CI early.</strong> The shell-commands-in-Python bug would have been caught instantly by a linter. Setting this up takes 30 minutes and saves hours.</li>
+                <li><strong>Build the comparison panel on stored data from the start.</strong> Early versions recomputed neighbors on the fly, which was slow and made results inconsistent. Using stored artifacts from the beginning would have been cleaner.</li>
+            </ul>
+
+            <h3>Advice for Someone Starting a Similar Project</h3>
+            <ul>
+                <li><strong>Nail down your data contracts first.</strong> Define what each artifact file contains, what its shape is, and how it relates to other files. Document this before writing any code.</li>
+                <li><strong>Use a deterministic algorithm (PCA) as your debugging baseline.</strong> When something goes wrong, compare against PCA to isolate whether the bug is in shared code or algorithm-specific code.</li>
+                <li><strong>Budget 3–4× for interaction logic.</strong> Anything involving selection, hover, or cross-component state will take longer than you think.</li>
+                <li><strong>Write validation checks as you go.</strong> Don't wait until you hit a bug to add a check. If something could go wrong, check for it.</li>
+                <li><strong>Keep status reports.</strong> They're annoying to write but invaluable for reflection and writeups.</li>
+            </ul>
+        </section>
+
+        <!-- Deliverables Section -->
+        <section id="deliverables">
+            <h2>6. Deliverables</h2>
+
+            <h3>Repository Structure</h3>
+
+            <div class="file-tree">
+                <ul>
+                    <li>src/processor/ <span class="comment"># Core pipeline modules</span>
+                        <ul>
+                            <li>__init__.py</li>
+                            <li>preprocess.py <span class="comment"># Text cleaning, tokenization</span></li>
+                            <li>vectorize.py <span class="comment"># TF-IDF generation</span></li>
+                            <li>reduce.py <span class="comment"># PCA/SVD dimension reduction</span></li>
+                            <li>embed.py <span class="comment"># t-SNE, UMAP</span></li>
+                            <li>cluster.py <span class="comment"># HDBSCAN, KMeans</span></li>
+                            <li>neighbors.py <span class="comment"># K-NN computation</span></li>
+                            <li>viz.py <span class="comment"># Plotting utilities</span></li>
+                        </ul>
+                    </li>
+                    <li>scripts/
+                        <ul>
+                            <li>run_all.py <span class="comment"># Main entry point</span></li>
+                        </ul>
+                    </li>
+                    <li>prototype/
+                        <ul>
+                            <li>streamlit_app.py <span class="comment"># Interactive explorer</span></li>
+                        </ul>
+                    </li>
+                    <li>tests/
+                        <ul>
+                            <li>test_distance_metric_consistency.py</li>
+                            <li>test_integration.py</li>
+                            <li>test_metrics_regression.py</li>
+                            <li>test_metric_stability.py</li>
+                            <li>test_pipeline_reproducible.py</li>
+                            <li>test_reduce_neighbors.py</li>
+                            <li>test_vectorize.py</li>
+                            <li>test_viz.py</li>
+                        </ul>
+                    </li>
+                    <li>artifacts/ <span class="comment"># Generated outputs</span>
+                        <ul>
+                            <li>preproc_default/ (example)</li>
+                            <li>preproc_no_stopwords/ (example)</li>
+                            <li>newsgroups/</li>
+                        </ul>
+                    </li>
+                    <li>visualizations/</li>
+                    <li>docs/
+                        <ul>
+                            <li>TESTING.md</li>
+                        </ul>
+                    </li>
+                    <li>README.md</li>
+                    <li>requirements.txt</li>
+                </ul>
+            </div>
+
+            <h3>Key Entry Points</h3>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Purpose</th>
+                        <th>Command</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Run full pipeline</td>
+                        <td><code>python run_pipeline.py</code></td>
+                    </tr>
+                    <tr>
+                        <td>Run pipeline + evaluation</td>
+                        <td><code>python -u scripts/run_all.py</code></td>
+                    </tr>
+                    <tr>
+                        <td>Evaluation only (skip pipeline)</td>
+                        <td><code>python -u scripts/run_all.py --skip-pipeline</code></td>
+                    </tr>
+                    <tr>
+                        <td>Dry run (config snapshot only)</td>
+                        <td><code>python -u scripts/run_all.py --dry-run</code></td>
+                    </tr>
+                    <tr>
+                        <td>Launch explorer</td>
+                        <td><code>python -m streamlit run prototype/streamlit_app.py</code></td>
+                    </tr>
+                    <tr>
+                        <td>Run tests</td>
+                        <td><code>pytest tests/</code></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>Artifact Validation Checklist</h3>
+
+            <p>Before loading any artifact bundle, verify:</p>
+
+            <ol>
+                <li><strong>Row count parity:</strong> All <code>.npy</code> coordinate files and <code>cluster_labels.npy</code> should have the same number of rows as <code>processed_docs.csv</code>.</li>
+                <li><strong>TF-IDF dimensionality:</strong> <code>tfidf_matrix.npz</code> should have shape <code>(n_docs, n_features)</code> where <code>n_docs</code> matches the coordinate files.</li>
+                <li><strong>Neighbor indices in range:</strong> All values in <code>neighbors_*.npy</code> should be valid indices into the coordinate arrays.</li>
+                <li><strong>No NaN/Inf:</strong> Coordinate arrays should contain only finite values.</li>
+                <li><strong>doc_id uniqueness:</strong> The <code>doc_id</code> column in <code>processed_docs.csv</code> should have no duplicates.</li>
+            </ol>
+        </section>
+
+        <!-- Bibliography Section -->
+        <section id="bibliography">
+            <h2>7. Annotated Bibliography</h2>
+
+            <div class="bib-entry">
+                <p class="title">UMAP: Uniform Manifold Approximation and Projection for Dimension Reduction</p>
+                <p class="authors">McInnes, L., Healy, J., & Melville, J. (2018). arXiv:1802.03426</p>
+                <p class="annotation">Core algorithm reference for UMAP. Key insight: the <code>min_dist</code> and <code>n_neighbors</code> parameters trade off local vs. global structure preservation. Lower <code>min_dist</code> produces tighter clusters but can create artificial separation; higher <code>n_neighbors</code> captures more global structure but loses local detail. The reproducibility notes were essential for getting consistent results across runs.</p>
+            </div>
+
+            <div class="bib-entry">
+                <p class="title">Understanding How Dimension Reduction Tools Work: An Empirical Approach to Deciphering t-SNE, UMAP, TriMAP, and PaCMAP for Data Visualization</p>
+                <p class="authors">Wang, Y., Huang, H., Rudin, C., & Shaposhnik, Y. (2020). arXiv:2012.04456</p>
+                <p class="annotation">Comparative analysis of dimensionality reduction algorithms. Useful for understanding when UMAP clusters are "real" vs. artifacts of the algorithm. The paper's analysis of neighborhood preservation metrics informed the design of the comparison panel.</p>
+            </div>
+
+            <div class="bib-entry">
+                <p class="title">How to Use t-SNE Effectively</p>
+                <p class="authors">Wattenberg, M., Viégas, F., & Johnson, I. (2016). Distill.</p>
+                <p class="annotation">Interactive explanation of t-SNE behavior. Key takeaway: perplexity effectively sets the scale of the neighborhood, and you should try multiple perplexity values. Cluster sizes in t-SNE visualizations are not meaningful; only relative distances within clusters are interpretable.</p>
+            </div>
+
+            <div class="bib-entry">
+                <p class="title">Serendip: Topic Model-Driven Visual Exploration of Text Corpora</p>
+                <p class="authors">Alexander, E., et al. (2014). IEEE VAST.</p>
+                <p class="annotation">Influential text visualization system. The flexible linking between overview and detail views informed the design of the linked brushing in this project.</p>
+            </div>
+
+            <div class="bib-entry">
+                <p class="title">embComp: Visual Interactive Comparison of Vector Embeddings</p>
+                <p class="authors">Heimerl, F., et al. (2020). IEEE VIS.</p>
+                <p class="annotation">System for comparing different embedding spaces. The neighborhood comparison approach (showing which neighbors are preserved vs. lost across embeddings) influenced the comparison panel design.</p>
+            </div>
+
+            <div class="bib-entry">
+                <p class="title">Streamlit Session State Documentation</p>
+                <p class="authors">Streamlit, Inc. (2024)</p>
+                <p class="annotation">Essential reference for maintaining selection state across Streamlit reruns. The key insight is that session state persists across widget interactions but not across page reloads, which explains why state persistence remains a TODO.</p>
+            </div>
+
+            <div class="bib-entry">
+                <p class="title">Plotly Python Selection Events</p>
+                <p class="authors">Plotly Technologies (2024)</p>
+                <p class="annotation">Documentation for capturing lasso/box/click selections in Plotly. The <code>plotly_events</code> library was necessary because native Streamlit-Plotly integration doesn't expose selection data. Workarounds were needed for default drag mode.</p>
+            </div>
+        </section>
+
+        <!-- Quick Start Section -->
+        <section id="quickstart">
+            <h2>8. Quick Start Guide</h2>
+
+            <h3>Installation</h3>
+
+<pre><code># Clone the repository (if not already cloned)
+git clone https://github.com/nullPtrErikaS/research.git
+cd research
+
+# Create virtual environment (recommended)
+python -m venv .venv
+# On Windows (PowerShell): .\.venv\Scripts\Activate.ps1
+# On macOS/Linux: source .venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt</code></pre>
+
+            <h3>Running the Pipeline</h3>
+
+<pre><code># Run full pipeline (preprocessing, vectorization, embeddings, clustering)
+python run_pipeline.py
+
+# Run pipeline + evaluation (orchestrator script)
+python -u scripts/run_all.py
+
+# Evaluation only (skip pipeline)
+python -u scripts/run_all.py --skip-pipeline
+
+# Dry run (write config snapshot, no computation)
+python -u scripts/run_all.py --dry-run</code></pre>
+
+            <h3>Launching the Explorer</h3>
+
+<pre><code># Start the Streamlit app
+python -m streamlit run prototype/streamlit_app.py
+
+# The app will open in your browser at http://localhost:8501</code></pre>
+
+            <h3>Running Tests</h3>
+
+<pre><code># Run all tests
+pytest tests/
+
+# Run specific test file
+pytest tests/test_regression.py
+
+# Run with verbose output
+pytest tests/ -v</code></pre>
+
+            <h3>Common Issues</h3>
+
+            <p><strong>Plots are blank:</strong> Check that the artifact bundle has matching row counts across all <code>.npy</code> files. Run <code>python scripts/run_all.py --mode dry</code> to validate.</p>
+
+            <p><strong>Selection highlights wrong documents:</strong> This usually means doc_id alignment is off. Regenerate artifacts with a fresh pipeline run, or check that you're loading the correct bundle.</p>
+
+            <p><strong>UMAP results differ between runs:</strong> Ensure <code>random_state</code> is set in the UMAP configuration. For testing, also set <code>n_jobs=1</code> to disable parallelism.</p>
+
+            <p><strong>Memory errors with large datasets:</strong> The similarity heatmap is size-guarded but other components may not be. For datasets larger than 10k documents, consider using the quick evaluation mode or subsampling.</p>
+        </section>
+    </main>
+
+    <footer>
+        <p>Short-Text Embedding Explorer · CS 699 Directed Study · Fall 2025</p>
+        <p>Advisor: Michael Gleicher · University of Wisconsin–Madison</p>
+    </footer>
 </body>
 </html>

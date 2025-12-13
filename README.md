@@ -1,48 +1,57 @@
-Research - Text Embedding & Clustering Pipeline
+# Short-Text Embedding Explorer
 
-This repository contains a small exploratory pipeline for text processing,
-TF-IDF vectorization, dimensionality reduction (SVD / t-SNE / UMAP), nearest
-neighbours, and clustering. The `artifacts/` directory stores model data and
-coordinates; `visualizations/` contains PNG plots.
+A modular pipeline and interactive visualization tool for analyzing short-text embeddings. This project enables researchers to compare dimensionality reduction techniques (PCA, t-SNE, UMAP), explore cluster structure, and analyze document neighborhoods across multiple projection methods simultaneously.
 
-Quick usage (recommended):
+## What's Included
 
-- Run the pipeline + evaluation (this will write artifacts and update report):
+**Pipeline** (`src/processor/`): Modular components for text preprocessing, TF-IDF vectorization, PCA/t-SNE/UMAP dimensionality reduction, k-NN computation, and clustering.
 
-  ```powershell
-  python -u .\scripts\run_all.py
-  ```
+**Explorer** (`prototype/streamlit_app.py`): Interactive Streamlit app with linked brushing across all three projection views, search/filtering, side-by-side document comparison, selection history/undo, and export functionality.
 
-- Run only evaluation (fast):
+**Artifacts**: Reproducible output bundles containing TF-IDF matrices, coordinate arrays, nearest-neighbor indices, cluster labels, and evaluation metrics.
 
-  ```powershell
-  python -u .\scripts\run_all.py --skip-pipeline
-  ```
+**Tests**: Regression, reproducibility, stability, and metric validation tests to catch silent drift and ensure consistent results.
 
-- Dry-run (write config snapshot but do not execute pipeline or eval):
+## Quick Start
 
-  ```powershell
-  python -u .\scripts\run_all.py --dry-run
-  ```
+```powershell
+# Clone and setup
+git clone https://github.com/nullPtrErikaS/research.git
+cd research
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 
-Key artifacts produced (under `artifacts/`):
-- `tfidf_matrix.npz` or `tfidf_matrix.npy` — TF-IDF matrix (sparse/dense)
-- `tfidf_vectorizer.pkl`, `vocabulary.pkl` — vectorizer artifacts
-- `coords.npy`, `coords_tsne.npy`, `coords_umap.npy` — 2D embeddings
-- `nn_indices.npy`, `nn_distances.npy` — nearest-neighbour outputs
-- `cluster_labels.npy` — cluster labels
-- `processed_data_with_clusters.csv` — processed document table with `cluster`
-- `metrics.json` — evaluation metrics computed by `scripts/eval_metrics.py`
-- `config.json` — snapshot of run flags produced by `scripts/run_all.py`
+# Run the pipeline
+python run_pipeline.py
 
-Notes and next steps:
-- A small package wrapper `src/processor` provides a stable import point. An
-  incremental modularization is in progress (preprocess module, etc.).
-- To reproduce exact runs, re-use the saved `tfidf_vectorizer.pkl` and the
-  coordinate files in `artifacts/`.
+# Launch the explorer
+python -m streamlit run prototype/streamlit_app.py
 
-If you'd like I can:
-- extract sample documents per cluster for inspection,
-- continue splitting `parse.py` into modules (preprocess, vectorize, embed, viz),
-- add small unit tests for critical functions (TF-IDF, PCA, neighbors).
+# Run tests
+pytest tests/
+```
+
+## Key Features
+
+- **Linked brushing**: Selections sync across PCA, t-SNE, and UMAP in real time
+- **Search & filter**: By document ID, keyword, or cluster
+- **Comparison panel**: Side-by-side documents with similarity metrics and neighbor overlap
+- **Selection history**: Undo/redo without losing context
+- **Artifact validation**: Automatic checks for row alignment and dimension consistency
+- **Export**: Download selected document IDs as JSON
+
+## Artifact Outputs
+
+Under `artifacts/`:
+- `tfidf_matrix.npz` — TF-IDF vectors
+- `coords.npy`, `coords_tsne.npy`, `coords_umap.npy` — 2D coordinate arrays
+- `nn_indices.npy`, `nn_distances.npy` — k-NN results
+- `cluster_labels.npy` — Cluster assignments
+- `processed_data_with_clusters.csv` — Cleaned documents with metadata
+- `metrics.json`, `config.json` — Evaluation results and run configuration
+
+## Documentation
+
+See `docs/gleicher_frontend.html` for the full project write-up, including methodology, results, lessons learned, and self-evaluation.
 
