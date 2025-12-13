@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Directed Study Write-Up Guide</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Source+Serif+4:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b1224;
+      --panel: rgba(255,255,255,0.04);
+      --panel-strong: rgba(255,255,255,0.08);
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #06b6d4;
+      --accent-2: #22d3ee;
+      --border: rgba(255,255,255,0.12);
+      --shadow: 0 12px 40px rgba(0,0,0,0.35);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+      background: radial-gradient(circle at 20% 20%, rgba(34,211,238,0.08), transparent 30%),
+                  radial-gradient(circle at 80% 10%, rgba(14,182,212,0.08), transparent 26%),
+                  linear-gradient(145deg, #0b1224 0%, #0f172a 55%, #0a0f1f 100%);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+    header {
+      padding: 48px 24px 24px;
+      max-width: 1080px;
+      margin: 0 auto;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--accent-2);
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      font-size: 0.9rem;
+    }
+    h1 {
+      margin: 16px 0 10px;
+      font-size: 2.4rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .lede {
+      max-width: 820px;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+    nav.quick-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    nav.quick-links a {
+      text-decoration: none;
+      color: var(--text);
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      transition: transform 140ms ease, border-color 140ms ease, color 140ms ease;
+    }
+    nav.quick-links a:hover {
+      transform: translateY(-2px);
+      border-color: var(--accent);
+      color: var(--accent-2);
+    }
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 0 24px 56px;
+      display: grid;
+      gap: 22px;
+    }
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 22px 20px 20px;
+      box-shadow: var(--shadow);
+    }
+    .section h2 {
+      margin: 0 0 12px;
+      font-size: 1.3rem;
+      letter-spacing: -0.01em;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--panel-strong);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    ul.clean {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--text);
+    }
+    ul.clean li { margin-bottom: 8px; }
+    .grid {
+      display: grid;
+      gap: 14px;
+    }
+    .grid.two { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    .card {
+      padding: 16px;
+      border-radius: 14px;
+      background: var(--panel-strong);
+      border: 1px solid var(--border);
+      min-height: 100%;
+    }
+    .card h3 {
+      margin-top: 0;
+      margin-bottom: 8px;
+      font-size: 1.05rem;
+    }
+    .card p { margin: 0 0 8px; color: var(--muted); }
+    .tag-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .btn {
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 600;
+      transition: transform 140ms ease, border-color 140ms ease, color 140ms ease;
+    }
+    .btn.primary { border-color: var(--accent); color: var(--accent-2); }
+    .btn:hover { transform: translateY(-2px); border-color: var(--accent); color: var(--accent-2); }
+    .timeline {
+      display: grid;
+      gap: 10px;
+    }
+    .timeline-item {
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+    }
+    .muted { color: var(--muted); }
+    footer { max-width: 1080px; margin: 0 auto 32px; padding: 0 24px; color: var(--muted); font-size: 0.95rem; }
+    @media (max-width: 720px) {
+      header { padding: 38px 18px 18px; }
+      main { padding: 0 18px 48px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="eyebrow">Directed Study Write-Up</div>
+    <h1>Michael Gleicher guidance page</h1>
+    <p class="lede">A concise front end for the directed study write-up guidance: what to submit, how to reflect, and how to package code, docs, and results so future you (and teammates) can pick up where you leave off.</p>
+    <nav class="quick-links">
+      <a href="#contents">What to include</a>
+      <a href="#final-doc">Final doc sections</a>
+      <a href="#checklist">Submission checklist</a>
+      <a href="#status">Status notes</a>
+    </nav>
+  </header>
+
+  <main>
+    <section id="contents" class="section">
+      <div class="pill">Core deliverables</div>
+      <h2>What to include</h2>
+      <ul class="clean">
+        <li>Original project proposal (if available).</li>
+        <li>Source code with build/run notes; ideally a GitHub repo (uwgraphics if applicable).</li>
+        <li>Example results: demo link, videos, images, or use-case descriptions.</li>
+        <li>Bibliography with full citations; annotated is preferred (what you learned from each).</li>
+        <li>Final project document (see required sections below).</li>
+      </ul>
+      <div class="cta-row">
+        <a class="btn primary" href="#final-doc">View required sections</a>
+        <a class="btn" href="#checklist">Open checklist</a>
+      </div>
+    </section>
+
+    <section id="final-doc" class="section">
+      <div class="pill">Final document</div>
+      <h2>The four required sections</h2>
+      <div class="grid two">
+        <div class="card">
+          <h3>1) Describe your results</h3>
+          <p>What you built, methods, how it works, how it is used, limitations, and how you evaluated it. Include enough documentation for someone else to run and extend it.</p>
+          <div class="tag-row">
+            <span class="pill">What it does</span>
+            <span class="pill">Methods</span>
+            <span class="pill">Limitations</span>
+          </div>
+        </div>
+        <div class="card">
+          <h3>2) Describe the work</h3>
+          <p>How you got there: where time went, what you tried, what was hard or easy, and what did not make the final cut. Use your status reports to jog memory.</p>
+          <div class="tag-row">
+            <span class="pill">Process</span>
+            <span class="pill">Attempts</span>
+            <span class="pill">Dead ends</span>
+          </div>
+        </div>
+        <div class="card">
+          <h3>3) What you learned</h3>
+          <p>Technical and non-technical takeaways. Focus on learning outcomes, not only the artifact.</p>
+          <div class="tag-row">
+            <span class="pill">Lessons</span>
+            <span class="pill">Skills</span>
+            <span class="pill">Insights</span>
+          </div>
+        </div>
+        <div class="card">
+          <h3>4) Self-evaluation</h3>
+          <p>How happy you are with the project, what you would do differently, and guidance for the next person (possibly future you).</p>
+          <div class="tag-row">
+            <span class="pill">Reflection</span>
+            <span class="pill">Next steps</span>
+            <span class="pill">Advice</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="checklist" class="section">
+      <div class="pill">Submission checklist</div>
+      <h2>Code, docs, and handoff</h2>
+      <ul class="clean">
+        <li>Code present with build/use instructions; verify all files are present.</li>
+        <li>Repo accessible (uwgraphics fork/ownership if required).</li>
+        <li>Large assets (videos, data) stored appropriately; document locations.</li>
+        <li>Each directory has a brief README for orientation.</li>
+        <li>Results artifacts linked (demos, images, videos, use cases).</li>
+        <li>Bibliography complete and preferably annotated.</li>
+      </ul>
+    </section>
+
+    <section id="status" class="section">
+      <div class="pill">Reflection prompts</div>
+      <h2>Use in weekly status notes</h2>
+      <div class="timeline">
+        <div class="timeline-item">
+          <strong>Plan vs outcome</strong>
+          <div class="muted">State your goals for the week and what you accomplished; call out gaps and why.</div>
+        </div>
+        <div class="timeline-item">
+          <strong>Debug the process</strong>
+          <div class="muted">Note blockers (alignment issues, data quality, interaction bugs) and how you resolved or mitigated them.</div>
+        </div>
+        <div class="timeline-item">
+          <strong>Evaluate the work</strong>
+          <div class="muted">How do the results support analysis? Are selections stable, clusters coherent, metrics reliable?</div>
+        </div>
+        <div class="timeline-item">
+          <strong>Next steps</strong>
+          <div class="muted">List immediate next goals and how they connect to the bigger picture.</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Inspired by Michael Gleicher's directed study write-up guidance. Keep it concise, link to artifacts, and make life easy for the next person picking up your work.
+  </footer>
+</body>
+</html>

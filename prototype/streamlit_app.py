@@ -214,13 +214,13 @@ def run_search(df_slice, query, scopes):
 
 
 # Locate data files in the repo (flexible)
-coords_tsne_path = find_file(['coords_tsne.npy', 'artifacts/coords_tsne.npy', 'artifacts/preproc_default/coords_tsne.npy'])
-coords_umap_path = find_file(['coords_umap.npy', 'artifacts/coords_umap.npy', 'artifacts/preproc_default/coords_umap.npy'])
+coords_tsne_path = find_file(['coords_tsne.npy', 'artifacts/coords_tsne.npy', 'artifacts/newsgroups/coords_tsne.npy', 'artifacts/preproc_default/coords_tsne.npy'])
+coords_umap_path = find_file(['coords_umap.npy', 'artifacts/coords_umap.npy', 'artifacts/newsgroups/coords_umap.npy', 'artifacts/preproc_default/coords_umap.npy'])
 # Prefer preproc_default coords (full dataset) over a small summary file in artifacts
-coords_pca_path = find_file(['artifacts/preproc_default/coords.npy', 'artifacts/coords.npy', 'coords.npy'])
-cluster_labels_path = find_file(['cluster_labels.npy', 'artifacts/cluster_labels.npy', 'artifacts/preproc_default/cluster_labels.npy'])
-processed_csv_path = find_file(['processed_data_with_clusters.csv', 'artifacts/processed_data_with_clusters.csv', 'artifacts/preproc_default/processed_data_with_clusters.csv'])
-doc_ids_path = find_file(['doc_ids.txt', 'artifacts/doc_ids.txt', 'artifacts/preproc_default/doc_ids.txt'])
+coords_pca_path = find_file(['artifacts/preproc_default/coords.npy', 'artifacts/newsgroups/coords.npy', 'artifacts/coords.npy', 'coords.npy'])
+cluster_labels_path = find_file(['cluster_labels.npy', 'artifacts/cluster_labels.npy', 'artifacts/newsgroups/cluster_labels.npy', 'artifacts/preproc_default/cluster_labels.npy'])
+processed_csv_path = find_file(['processed_data_with_clusters.csv', 'artifacts/processed_data_with_clusters.csv', 'artifacts/newsgroups/processed_data_with_clusters.csv', 'artifacts/preproc_default/processed_data_with_clusters.csv'])
+doc_ids_path = find_file(['doc_ids.txt', 'artifacts/doc_ids.txt', 'artifacts/newsgroups/doc_ids.txt', 'artifacts/preproc_default/doc_ids.txt'])
 
 
 # Load or synthesize small dataset
