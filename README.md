@@ -4,13 +4,10 @@ A modular pipeline and interactive visualization tool for analyzing short-text e
 
 ## What's Included
 
-**Pipeline** (`src/processor/`): Modular components for text preprocessing, TF-IDF vectorization, PCA/t-SNE/UMAP dimensionality reduction, k-NN computation, and clustering.
-
-**Explorer** (`prototype/streamlit_app.py`): Interactive Streamlit app with linked brushing across all three projection views, search/filtering, side-by-side document comparison, selection history/undo, and export functionality.
-
-**Artifacts**: Reproducible output bundles containing TF-IDF matrices, coordinate arrays, nearest-neighbor indices, cluster labels, and evaluation metrics.
-
-**Tests**: Regression, reproducibility, stability, and metric validation tests to catch silent drift and ensure consistent results.
+- **Pipeline** (`src/processor/`): Modular components for text preprocessing, TF-IDF vectorization, PCA/t-SNE/UMAP dimensionality reduction, k-NN computation, and clustering.
+- **Explorer** (`prototype/streamlit_app.py`): Interactive Streamlit app with linked brushing across all three projection views, search/filtering, side-by-side document comparison, selection history/undo, and export functionality.
+- **Artifacts**: Reproducible output bundles containing TF-IDF matrices, coordinate arrays, nearest-neighbor indices, cluster labels, and evaluation metrics.
+- **Tests**: Regression, reproducibility, stability, and metric validation tests to catch silent drift and ensure consistent results.
 
 ## Quick Start
 
@@ -44,14 +41,17 @@ pytest tests/
 ## Artifact Outputs
 
 Under `artifacts/`:
-- `tfidf_matrix.npz` — TF-IDF vectors
-- `coords.npy`, `coords_tsne.npy`, `coords_umap.npy` — 2D coordinate arrays
-- `nn_indices.npy`, `nn_distances.npy` — k-NN results
-- `cluster_labels.npy` — Cluster assignments
-- `processed_data_with_clusters.csv` — Cleaned documents with metadata
-- `metrics.json`, `config.json` — Evaluation results and run configuration
+
+| File | Description |
+|------|-------------|
+| `tfidf_matrix.npz` | TF-IDF vectors |
+| `coords.npy`, `coords_tsne.npy`, `coords_umap.npy` | 2D coordinate arrays |
+| `nn_indices.npy`, `nn_distances.npy` | k-NN results |
+| `cluster_labels.npy` | Cluster assignments |
+| `processed_data_with_clusters.csv` | Cleaned documents with metadata |
+| `metrics.json`, `config.json` | Evaluation results and run configuration |
 
 ## Documentation
 
-See `docs/gleicher_frontend.html` for the full project write-up, including methodology, results, lessons learned, and self-evaluation.
+See [`docs/gleicher_frontend.html`](docs/gleicher_frontend.html) for the full project write-up, including methodology, results, lessons learned, and self-evaluation.
 
