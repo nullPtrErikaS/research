@@ -434,11 +434,11 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, 
             df_plot.loc[df_plot['doc_id'].isin(selected_ids), '__status'] = 'Selected'
             df_plot.loc[df_plot['doc_id'].isin(selected_ids), '__size'] = 14
         
-        # Improved color scheme
+        # Improved color scheme - more vibrant, less washed out
         color_map = {
-            'Selected': '#FF4444',      # Bright red
-            'Search hit': '#FFD700',    # Gold
-            'Other': '#AAAAAA'          # Light gray
+            'Selected': '#E63946',      # Rich red
+            'Search hit': '#F4A261',    # Warm orange
+            'Other': '#457B9D'          # Deep blue-gray
         }
         
         fig = px.scatter(
@@ -465,26 +465,29 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, 
     )
     
     # attach doc_id as customdata for robust mapping
+    # Keep it simple: don't modify traces, let plotly_events use point indices
     try:
-        ids = df_plot['doc_id'].tolist()
-        sizes = df_plot['__size'].tolist()
-        for idx, d in enumerate(fig.data):
-            d.customdata = ids
-            # Set size based on status
-            if color_mode == 'Cluster':
-                # In cluster mode, apply sizes from dataframe
-                d.marker.size = sizes
-            else:
-                # In selection mode, set size based on trace name
-                status = d.name
-                if status == 'Selected':
-                    d.marker.size = 14
-                elif status == 'Search hit':
-                    d.marker.size = 12
+        # Just set better marker styling
+        for trace in fig.data:
+            # Solid, vibrant markers with good visibility
+            if color_mode == 'Selection':
+                # In selection mode, size by status
+                if trace.name == 'Selected':
+                    trace.marker.size = 10
+                    trace.marker.opacity = 0.95
+                elif trace.name == 'Search hit':
+                    trace.marker.size = 9
+                    trace.marker.opacity = 0.9
                 else:
-                    d.marker.size = 8
-            d.marker.opacity = 1.0  # Full opacity for sharper edges
-            d.marker.line = dict(width=1.2, color='#000000')  # Thicker, darker border
+                    trace.marker.size = 5
+                    trace.marker.opacity = 0.75
+            else:
+                # In cluster mode, uniform sizing
+                trace.marker.size = 6
+                trace.marker.opacity = 0.85
+            
+            # Clean dark border for definition
+            trace.marker.line = dict(width=0.8, color='rgba(0,0,0,0.4)')
     except Exception:
         pass
     
@@ -772,7 +775,6 @@ with st.sidebar:
     
     st.markdown('---')
     st.subheader('Display options')
-    use_native_plotly = st.checkbox('Use native Plotly (disable plotly_events)', value=True, help='If plot points are invisible, use native rendering instead of the plotly_events wrapper.')
     show_download_buttons = st.checkbox('Show plot download buttons', value=False, help='Enable PNG export for each plot')
 
 
@@ -1016,7 +1018,7 @@ with st.expander('How to use this tool', expanded=False):
 
 col1, col2, col3 = st.columns([1,1,1])
 
-# render plots and capture selections via plotly_events
+# render plots with native Streamlit selection handling
 with col1:
     st.markdown("### t-SNE Projection")
     fig_tsne = make_plot(
@@ -1029,15 +1031,25 @@ with col1:
         hover_cols,
         color_mode
     )
-    if use_native_plotly:
-        st.plotly_chart(fig_tsne, use_container_width=True)
-        tsne_selected = []
-    else:
-        ev_tsne = plotly_events(fig_tsne, click_event=True, select_event=True, key='tsne')
-        tsne_selected = extract_doc_ids_from_events(ev_tsne, df_work)
-        if tsne_selected and len(tsne_selected) > 0:  # Only update if we actually got selections
-            update_selection(tsne_selected, additive=st.session_state.get('additive_mode', False))
-    # debug helper: optionally show the raw Plotly chart below the interactive wrapper
+    selection_tsne = st.plotly_chart(
+        fig_tsne, 
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode=['points', 'box', 'lasso'],
+        key='chart_tsne'
+    )
+    
+    # Extract selected points from Streamlit's native selection
+    if selection_tsne and hasattr(selection_tsne, 'selection') and selection_tsne.selection:
+        try:
+            point_indices = selection_tsne.selection.get('point_indices', [])
+            if point_indices:
+                selected_docs = [df_work.iloc[i]['doc_id'] for i in point_indices if i < len(df_work)]
+                if selected_docs:
+                    update_selection(selected_docs, additive=st.session_state.get('additive_mode', False))
+        except Exception:
+            pass
+    
     if show_download_buttons:
         st.download_button(
             label='Download t-SNE',
@@ -1046,11 +1058,6 @@ with col1:
             mime='text/html',
             use_container_width=True
         )
-    try:
-        if st.sidebar.checkbox('Show raw t-SNE Plotly (debug)', value=False):
-            st.plotly_chart(fig_tsne, use_container_width=True)
-    except Exception:
-        pass
 
 with col2:
     st.markdown("### UMAP Projection")
@@ -1064,14 +1071,24 @@ with col2:
         hover_cols,
         color_mode
     )
-    if use_native_plotly:
-        st.plotly_chart(fig_umap, use_container_width=True)
-        umap_selected = []
-    else:
-        ev_umap = plotly_events(fig_umap, click_event=True, select_event=True, key='umap')
-        umap_selected = extract_doc_ids_from_events(ev_umap, df_work)
-        if umap_selected and len(umap_selected) > 0:  # Only update if we actually got selections
-            update_selection(umap_selected, additive=st.session_state.get('additive_mode', False))
+    selection_umap = st.plotly_chart(
+        fig_umap,
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode=['points', 'box', 'lasso'],
+        key='chart_umap'
+    )
+    
+    if selection_umap and hasattr(selection_umap, 'selection') and selection_umap.selection:
+        try:
+            point_indices = selection_umap.selection.get('point_indices', [])
+            if point_indices:
+                selected_docs = [df_work.iloc[i]['doc_id'] for i in point_indices if i < len(df_work)]
+                if selected_docs:
+                    update_selection(selected_docs, additive=st.session_state.get('additive_mode', False))
+        except Exception:
+            pass
+    
     if show_download_buttons:
         st.download_button(
             label='Download UMAP',
@@ -1080,11 +1097,6 @@ with col2:
             mime='text/html',
             use_container_width=True
         )
-    try:
-        if st.sidebar.checkbox('Show raw UMAP Plotly (debug)', value=False):
-            st.plotly_chart(fig_umap, use_container_width=True)
-    except Exception:
-        pass
 
 with col3:
     st.markdown("### PCA Projection")
@@ -1098,14 +1110,24 @@ with col3:
         hover_cols,
         color_mode
     )
-    if use_native_plotly:
-        st.plotly_chart(fig_pca, use_container_width=True)
-        pca_selected = []
-    else:
-        ev_pca = plotly_events(fig_pca, click_event=True, select_event=True, key='pca')
-        pca_selected = extract_doc_ids_from_events(ev_pca, df_work)
-        if pca_selected and len(pca_selected) > 0:  # Only update if we actually got selections
-            update_selection(pca_selected, additive=st.session_state.get('additive_mode', False))
+    selection_pca = st.plotly_chart(
+        fig_pca,
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode=['points', 'box', 'lasso'],
+        key='chart_pca'
+    )
+    
+    if selection_pca and hasattr(selection_pca, 'selection') and selection_pca.selection:
+        try:
+            point_indices = selection_pca.selection.get('point_indices', [])
+            if point_indices:
+                selected_docs = [df_work.iloc[i]['doc_id'] for i in point_indices if i < len(df_work)]
+                if selected_docs:
+                    update_selection(selected_docs, additive=st.session_state.get('additive_mode', False))
+        except Exception:
+            pass
+    
     if show_download_buttons:
         st.download_button(
             label='Download PCA',
