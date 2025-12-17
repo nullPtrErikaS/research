@@ -1,9 +1,9 @@
 {
-  "timestamp": "2025-11-05 15:27:39",
+  "variant": "default",
+  "timestamp": "2025-11-10 16:15:13",
   "runs": {
     "pca": {
       "trustworthiness_k5": 0.6035019738570782,
-      "trustworthiness_k10": 0.6052557977481972,
       "knn_overlap_k10": 0.03661971830985915,
       "n_points": 1491,
       "cluster_separation": {
@@ -14,7 +14,6 @@
     },
     "umap": {
       "trustworthiness_k5": 0.8910107984386426,
-      "trustworthiness_k10": 0.8778693623391768,
       "knn_overlap_k10": 0.27551978537894034,
       "n_points": 1491,
       "cluster_separation": {
@@ -25,7 +24,6 @@
     },
     "tsne": {
       "trustworthiness_k5": 0.9473724342006185,
-      "trustworthiness_k10": 0.9128241492329102,
       "knn_overlap_k10": 0.331924882629108,
       "n_points": 1491,
       "cluster_separation": {

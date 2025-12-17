@@ -37,6 +37,37 @@ def find_file(names):
         if os.path.exists(n):
             return n
     return None
+# Optional user-selected artifact bundle preference
+selected_bundle_root = None
+try:
+    import streamlit as st  # already imported above
+    selected_bundle_root = st.session_state.get('selected_bundle_root')
+except Exception:
+    selected_bundle_root = None
+
+def bundle_candidates(filename):
+    """Return candidate search paths for a filename, preferring a selected bundle root if set.
+
+    Known bundle roots:
+      - artifacts/preproc_default
+      - artifacts/newsgroups
+      - artifacts
+      - (repo root)
+    """
+    roots = []
+    if selected_bundle_root:
+        roots.append(selected_bundle_root)
+    # Default preference order
+    roots.extend(['artifacts/preproc_default', 'artifacts/newsgroups', 'artifacts', ''])
+    # Build candidate list, avoid duplicates
+    seen = set()
+    candidates = []
+    for r in roots:
+        path = f"{r}/{filename}" if r else filename
+        if path not in seen:
+            candidates.append(path)
+            seen.add(path)
+    return candidates
 
 
 def ensure_list(value):
@@ -213,14 +244,14 @@ def run_search(df_slice, query, scopes):
     return df_slice
 
 
-# Locate data files in the repo (flexible)
-coords_tsne_path = find_file(['coords_tsne.npy', 'artifacts/coords_tsne.npy', 'artifacts/newsgroups/coords_tsne.npy', 'artifacts/preproc_default/coords_tsne.npy'])
-coords_umap_path = find_file(['coords_umap.npy', 'artifacts/coords_umap.npy', 'artifacts/newsgroups/coords_umap.npy', 'artifacts/preproc_default/coords_umap.npy'])
-# Prefer preproc_default coords (full dataset) over a small summary file in artifacts
-coords_pca_path = find_file(['artifacts/preproc_default/coords.npy', 'artifacts/newsgroups/coords.npy', 'artifacts/coords.npy', 'coords.npy'])
-cluster_labels_path = find_file(['cluster_labels.npy', 'artifacts/cluster_labels.npy', 'artifacts/newsgroups/cluster_labels.npy', 'artifacts/preproc_default/cluster_labels.npy'])
-processed_csv_path = find_file(['processed_data_with_clusters.csv', 'artifacts/processed_data_with_clusters.csv', 'artifacts/newsgroups/processed_data_with_clusters.csv', 'artifacts/preproc_default/processed_data_with_clusters.csv'])
-doc_ids_path = find_file(['doc_ids.txt', 'artifacts/doc_ids.txt', 'artifacts/newsgroups/doc_ids.txt', 'artifacts/preproc_default/doc_ids.txt'])
+# Locate data files in the repo (flexible, with bundle preference)
+coords_tsne_path = find_file(bundle_candidates('coords_tsne.npy'))
+coords_umap_path = find_file(bundle_candidates('coords_umap.npy'))
+# Prefer preproc_default coords by default; bundle preference can override
+coords_pca_path = find_file(bundle_candidates('coords.npy'))
+cluster_labels_path = find_file(bundle_candidates('cluster_labels.npy'))
+processed_csv_path = find_file(bundle_candidates('processed_data_with_clusters.csv'))
+doc_ids_path = find_file(bundle_candidates('doc_ids.txt'))
 
 
 # Load or synthesize small dataset
@@ -532,6 +563,34 @@ tsne_lr = 200
 
 with st.sidebar:
     st.header('Controls')
+    # Dataset / artifact bundle selection
+    st.subheader('Dataset bundle')
+    bundle_options = []
+    bundle_map = {}
+    # Probe known roots
+    for root in ['artifacts/preproc_default', 'artifacts/newsgroups', 'artifacts', '']:
+        label = root if root else '(repo root)'
+        probe = f"{root}/processed_data_with_clusters.csv" if root else 'processed_data_with_clusters.csv'
+        if os.path.exists(probe):
+            bundle_options.append(label)
+            bundle_map[label] = root
+    if not bundle_options:
+        # Fallback option when no artifacts found
+        bundle_options = ['(auto)']
+        bundle_map['(auto)'] = None
+    current_label = '(auto)'
+    if st.session_state.get('selected_bundle_root') in bundle_map.values():
+        # Reverse lookup
+        for k, v in bundle_map.items():
+            if v == st.session_state.get('selected_bundle_root'):
+                current_label = k
+                break
+    chosen_label = st.selectbox('Choose artifact bundle', options=bundle_options, index=bundle_options.index(current_label) if current_label in bundle_options else 0)
+    new_root = bundle_map.get(chosen_label)
+    if new_root != st.session_state.get('selected_bundle_root'):
+        st.session_state['selected_bundle_root'] = new_root
+        st.info(f'Selected bundle: {chosen_label or "(auto)"}')
+        st.rerun()
     if alignment_issues:
         st.warning('Data alignment issues detected:')
         for it in alignment_issues:
@@ -713,7 +772,7 @@ with st.sidebar:
     
     st.markdown('---')
     st.subheader('Display options')
-    use_native_plotly = st.checkbox('Use native Plotly (disable plotly_events)', value=False, help='If plot points are invisible, use native rendering instead of the plotly_events wrapper.')
+    use_native_plotly = st.checkbox('Use native Plotly (disable plotly_events)', value=True, help='If plot points are invisible, use native rendering instead of the plotly_events wrapper.')
     show_download_buttons = st.checkbox('Show plot download buttons', value=False, help='Enable PNG export for each plot')
 
 
