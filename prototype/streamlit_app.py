@@ -10,6 +10,7 @@ from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.neighbors import NearestNeighbors
+from sklearn.cluster import KMeans
 from streamlit_plotly_events import plotly_events
 
 st.set_page_config(layout="wide", page_title="Embeddings Explorer (Prototype)")
@@ -439,6 +440,7 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, 
             color=color_col,
             hover_name='doc_id',
             hover_data=hover_cols,
+            custom_data=['doc_id'], # Explicitly include doc_id in customdata[0]
             color_discrete_sequence=px.colors.qualitative.Plotly,  # Use Plotly's default color palette
             # No fixed height - let it be responsive
         )
@@ -468,6 +470,7 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, 
             color_discrete_map=color_map,
             hover_name='doc_id',  # Show doc_id as the main title in hover
             hover_data=hover_cols,
+            custom_data=['doc_id'], # Explicitly include doc_id in customdata[0] for robust selection
             # No fixed height - let it be responsive
             category_orders={'__status': ['Selected', 'Search hit', 'Other']}  # Legend order
         )
@@ -576,6 +579,44 @@ with col_stat4:
 if st.session_state.get('chunk_parent_map'):
     st.caption('Chunk ↔ parent linking is active: clicking either side will automatically highlight its counterpart(s).')
 
+
+# Dynamic Clustering Logic
+with st.sidebar:
+    with st.expander('Clustering Settings', expanded=True):
+        cluster_mode = st.radio(
+            "Cluster Source", 
+            ["Static (Pre-computed)", "Dynamic (K-Means)"],
+            help="Static: Use the file's original groups. Dynamic: Create new groups right now based on the data."
+        )
+        
+        if cluster_mode == "Dynamic (K-Means)":
+            n_clusters = st.slider(
+                "Number of Clusters (k)", 
+                min_value=2, 
+                max_value=50, 
+                value=8, 
+                help="How many distinct groups (topics) to find."
+            )
+            
+            if st.button("Re-run Clustering") or 'dynamic_clusters' not in st.session_state or st.session_state.get('last_k') != n_clusters:
+                with st.spinner(f"Running K-Means with k={n_clusters}..."):
+                    try:
+                        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+                        # Ensure base_embeddings is valid
+                        if base_embeddings is not None and base_embeddings.shape[0] == len(df):
+                            new_labels = kmeans.fit_predict(base_embeddings)
+                            st.session_state['dynamic_clusters'] = new_labels
+                            st.session_state['last_k'] = n_clusters
+                            st.success(f"Generated {n_clusters} clusters!")
+                        else:
+                            st.error("Embeddings not available or aligned for clustering.")
+                    except Exception as e:
+                        st.error(f"Clustering failed: {e}")
+        
+        # Apply dynamic clusters if active
+        if cluster_mode == "Dynamic (K-Means)" and 'dynamic_clusters' in st.session_state:
+            df['cluster'] = st.session_state['dynamic_clusters']
+
 # default sidebar values (populated below)
 search_query = ''
 search_scopes = ['doc_id', 'phrase']
@@ -641,21 +682,21 @@ with st.sidebar:
 
     with st.expander('Search & Filter', expanded=False):
         search_query = st.text_input('Search doc_id / keyword / phrase', '')
-        search_scopes = st.multiselect('Search scopes', options=['doc_id', 'keywords', 'phrase'], default=['doc_id', 'phrase'])
+        search_scopes = st.multiselect('Search scopes', options=['doc_id', 'keywords', 'phrase'], default=['doc_id', 'phrase'], help="Where to look for your search terms. 'doc_id' checks filenames, 'phrase' checks full text.")
         clusters = sorted(df['cluster'].unique().tolist()) if 'cluster' in df.columns else []
-        cluster_filter = st.multiselect('Clusters', options=clusters, default=clusters)
+        cluster_filter = st.multiselect('Clusters', options=clusters, default=clusters, help="Filter data by topic group. Uncheck a cluster number to hide its documents from the view.")
         keyword_filter = st.multiselect('Keyword tags', options=available_keywords, default=[], help='Filter the visible points to only those containing specific keywords. Useful for narrowing down to a theme.')
         
         st.markdown('**Metadata Filters**')
         cat_defaults = [c for c in ['Data Domain', 'Tool Used/Mentioned', 'Publisher'] if c in categorical_metadata]
-        selected_cats = st.multiselect('Categorical fields', options=categorical_metadata, default=cat_defaults)
+        selected_cats = st.multiselect('Categorical fields', options=categorical_metadata, default=cat_defaults, help="Select metadata categories (like Publisher or Domain) to enable specific filters below.")
         for col in selected_cats:
             options = sorted({str(v) for v in df[col].dropna().unique() if str(v).strip()})
             sel = st.multiselect(f'{col}', options=options, key=f'cat_filter_{col}')
             if sel:
                 metadata_filters[col] = sel
         num_defaults = [c for c in ['Year', 'Subjective Trust Score:'] if c in numeric_metadata]
-        selected_nums = st.multiselect('Numeric fields', options=numeric_metadata, default=num_defaults)
+        selected_nums = st.multiselect('Numeric fields', options=numeric_metadata, default=num_defaults, help="Select numeric metadata (like Year or Score) to enable range sliders below.")
         for col in selected_nums:
             series = df[col].dropna()
             if series.empty:
@@ -669,7 +710,7 @@ with st.sidebar:
                 key=f'num_filter_{col}'
             )
             numeric_ranges[col] = (low, high)
-        max_points = st.slider('Max points to display', min_value=50, max_value=3000, value=1200, step=50)
+        max_points = st.slider('Max points to display', min_value=50, max_value=3000, value=1200, step=50, help="Reduce this number if the app feels slow. Limits how many dots are drawn.")
 
     with st.expander('Selection Tools', expanded=False):
         st.markdown('**Quick Jumps**')
@@ -678,7 +719,7 @@ with st.sidebar:
         select_doc = st.selectbox('Jump to doc_id', options=doc_options or [''], index=0, help='Instantly select and center on a specific document by ID.')
         if st.button('Highlight doc', key='btn_highlight_doc') and select_doc:
             update_selection([select_doc], additive=False)
-        multi_select = st.multiselect('Pin doc_ids (max 15)', options=doc_options, default=st.session_state['selected_ids'][:5], max_selections=15)
+        multi_select = st.multiselect('Pin doc_ids (max 15)', options=doc_options, default=st.session_state['selected_ids'][:5], max_selections=15, help="Manually select specific documents to keep them highlighted, even if you click elsewhere.")
         if st.button('Apply pinned selection', key='btn_apply_multi'):
             update_selection(multi_select or [], additive=False)
         
@@ -696,7 +737,7 @@ with st.sidebar:
                     st.session_state['selection_history'] = history
                     st.rerun()
         with qcol3:
-            if st.button('Random', key='btn_random', use_container_width=True, help='Select 10 random points to explore diverse examples.'):
+            if st.button('Random', key='btn_random', use_container_width=True, help='Select 10 random documents to explore the dataset.'):
                 import random
                 random_ids = random.sample(doc_options, min(10, len(doc_options)))
                 update_selection(random_ids, additive=False)
@@ -741,7 +782,7 @@ with st.sidebar:
     with st.expander('Sessions & Advanced', expanded=False):
         st.markdown('**Sessions**')
         # Save session
-        session_name = st.text_input('Session name', placeholder='my_analysis')
+        session_name = st.text_input('Session name', placeholder='my_analysis', help="Save your current filters, selection, and view settings to reload later.")
         if st.button('Save Session', use_container_width=True):
             if session_name:
                 import json
@@ -774,8 +815,8 @@ with st.sidebar:
 
         st.markdown('---')
         st.markdown('**Linking**')
-        chunk_choice = st.selectbox('Chunk column', options=['(none)'] + candidate_chunk_cols, index=1 if candidate_chunk_cols else 0)
-        parent_choice = st.selectbox('Parent column', options=['(none)'] + candidate_parent_cols, index=1 if candidate_parent_cols else 0)
+        chunk_choice = st.selectbox('Chunk column', options=['(none)'] + candidate_chunk_cols, index=1 if candidate_chunk_cols else 0, help="If your data refers to parts of a larger document, pick the 'part' ID column here.")
+        parent_choice = st.selectbox('Parent column', options=['(none)'] + candidate_parent_cols, index=1 if candidate_parent_cols else 0, help="Pick the 'parent' ID column here. This lets you click a part and automatically select the whole parent document.")
         chunk_col = None if chunk_choice == '(none)' else chunk_choice
         parent_col = None if parent_choice == '(none)' else parent_choice
         if chunk_col and parent_col:
@@ -792,16 +833,16 @@ with st.sidebar:
 
         st.markdown('---')
         st.markdown('**Comparison Inputs**')
-        doc_a = st.selectbox('Doc A', options=doc_options or [''], index=0, key='comp_a')
-        doc_b = st.selectbox('Doc B', options=doc_options or [''], index=1 if len(doc_options) > 1 else 0, key='comp_b')
+        doc_a = st.selectbox('Doc A', options=doc_options or [''], index=0, key='comp_a', help="Choose the first document for the side-by-side comparison.")
+        doc_b = st.selectbox('Doc B', options=doc_options or [''], index=1 if len(doc_options) > 1 else 0, key='comp_b', help="Choose the second document to compare against Doc A.")
 
         st.markdown('---')
         st.markdown('**Embedding Parameters**')
-        pca_comps = st.slider('PCA components (preview)', min_value=2, max_value=5, value=2)
-        umap_neighbors = st.slider('UMAP neighbors', min_value=5, max_value=120, value=15)
-        umap_min_dist = st.slider('UMAP min_dist', min_value=0.0, max_value=1.0, value=0.1)
-        tsne_perplexity = st.slider('t-SNE perplexity', min_value=5, max_value=100, value=30)
-        tsne_lr = st.slider('t-SNE learning rate', min_value=10, max_value=1000, value=200)
+        pca_comps = st.slider('PCA components (preview)', min_value=2, max_value=5, value=2, help="Advanced: Number of components for PCA dimensionality reduction.")
+        umap_neighbors = st.slider('UMAP neighbors', min_value=5, max_value=120, value=15, help="Advanced: Controls how broad the analysis is. Low values focus on local details; high values look at the big picture.")
+        umap_min_dist = st.slider('UMAP min_dist', min_value=0.0, max_value=1.0, value=0.1, help="Advanced: Controls how tightly points are packed. Lower is clumpier.")
+        tsne_perplexity = st.slider('t-SNE perplexity', min_value=5, max_value=100, value=30, help="Advanced: Roughly, how many neighbors each point 'cares' about. Higher values smooth the plot.")
+        tsne_lr = st.slider('t-SNE learning rate', min_value=10, max_value=1000, value=200, help="Advanced: Speed of the t-SNE optimization process.")
         recompute_previews = st.button('Recompute embedding previews')
         st.caption('Preview recompute runs locally. UMAP requires `umap-learn`; otherwise PCA fallbacks are used.')
 
@@ -901,7 +942,7 @@ for key in chart_keys:
             elif isinstance(current_state, dict):
                 selection_data = current_state.get('selection', {})
             
-            # Robust selection extraction using customdata (which we forced to be doc_id)
+            # Robust selection extraction using customdata
             if selection_data and 'points' in selection_data:
                 points = selection_data['points']
                 for p in points:
@@ -1087,7 +1128,8 @@ if embedding_rows:
 # PCA preview from base embeddings
 try:
     if len(embeddings_for_sim) >= pca_comps and embedding_dim >= pca_comps:
-        pca = PCA(n_components=pca_comps)
+        # Add random_state for consistency across reruns
+        pca = PCA(n_components=pca_comps, random_state=42)
         pca_coords = pca.fit_transform(embeddings_for_sim)
         df_work['pca_x'] = pca_coords[:, 0]
         df_work['pca_y'] = pca_coords[:, 1] if pca_comps >= 2 else 0.0
@@ -1135,21 +1177,20 @@ with filter_col2:
 # Add helpful tooltips
 with st.expander('How to use this tool', expanded=False):
     st.markdown('''
-    **Lasso Selection**: Click and drag to draw a selection shape around points
+    **Lasso Selection**: Click and drag to draw a circle around points you want to select.
     
-    **Additive Selection**: Check the "Additive Selection" box to add multiple lasso selections together
+    **Additive Selection**: Check this box to keep your previous selection when you make a new one (like holding Ctrl).
     
-    **t-SNE**: Preserves local structure, good for finding clusters
+    **t-SNE**: Best for finding distinct "neighborhoods" or groups of similar items.
     
-    **UMAP**: Balances local and global structure, faster than t-SNE
+    **UMAP**: A balanced map. Good for seeing both local groups and the big picture of how they relate.
     
-    **PCA**: Linear projection, shows main variance directions
+    **PCA**: The simplest view. Flattens the data to show the main trends and biggest differences.
     
     **Tips**:
-    - Selected points appear in **red** and are larger
-    - Search hits appear in **gold**
-    - Use the sidebar to filter, search, and export selections
-    - Click "Undo" to restore previous selection
+    - Selected points turn **RED**.
+    - Search results turn **GOLD**.
+    - Use the sidebar to filter data or change colors.
     ''')
 
 
@@ -1267,10 +1308,11 @@ def render_selection_details(selected_ids):
         return
 
     st.write(f"**{len(selected_df)} document(s) selected**")
-
     # If too many, just show a table
     if len(selected_df) > 5:
-        st.dataframe(selected_df.drop(columns=[c for c in selected_df.columns if c.startswith('__')]))
+        # Show metadata columns, hiding internal ones
+        cols_to_show = [c for c in selected_df.columns if not c.startswith('__')]
+        st.dataframe(selected_df[cols_to_show])
     else:
         # Show detailed cards for a few items
         cols = st.columns(len(selected_df))
@@ -1292,29 +1334,41 @@ def render_selection_details(selected_ids):
                     st.json(meta_dict, expanded=False)
 
 with tab_analyze:
-    st.header('Analysis', help='Statistical breakdown and similarity analysis of the CURRENTLY SELECTED documents.')
+    st.header('Analysis', help='Breakdown of your current selection. Shows which clusters (topics) are selected and detailed document info.')
     
     # Cluster Statistics
-    if 'cluster' in df_work.columns and df_work['cluster'].nunique() > 0:
+    # Cluster Statistics
+    # If selection active, show stats for SELECTION. Else show stats for VISIBLE (filtered) set.
+    target_df = df_work
+    stats_title = "Cluster Statistics (Filtered View)"
+    
+    if st.session_state['selected_ids']:
+        sel_df = df_work[df_work['doc_id'].isin(st.session_state['selected_ids'])]
+        if not sel_df.empty:
+            target_df = sel_df
+            stats_title = "Cluster Statistics (Selection)"
+
+    if 'cluster' in target_df.columns and target_df['cluster'].nunique() > 0:
         with st.expander('Cluster Statistics', expanded=True):
-            cluster_stats = df_work.groupby('cluster').agg({
+            cluster_stats = target_df.groupby('cluster').agg({
                 'doc_id': 'count',
                 'tsne_x': ['mean', 'std'],
                 'tsne_y': ['mean', 'std']
             }).round(2)
             cluster_stats.columns = ['Count', 't-SNE X Mean', 't-SNE X Std', 't-SNE Y Mean', 't-SNE Y Std']
-            st.markdown('**Cluster Statistics**', help='Aggregated statistics for each cluster in the current filtered view.')
+            st.markdown(f'**{stats_title}**', help='Shows which topic groups your documents belong to.')
             cluster_stats = cluster_stats.sort_values('Count', ascending=False)
             st.dataframe(cluster_stats, use_container_width=True)
             
-            # Quick cluster selection buttons
-            st.caption('Quick select cluster:')
-            cluster_cols = st.columns(min(5, len(cluster_stats)))
-            for idx, (cluster_id, row) in enumerate(cluster_stats.head(5).iterrows()):
-                with cluster_cols[idx]:
-                    if st.button(f'Cluster {cluster_id} ({int(row["Count"])})', key=f'select_cluster_{cluster_id}', use_container_width=True):
-                        cluster_docs = df_work[df_work['cluster'] == cluster_id]['doc_id'].tolist()
-                        update_selection(cluster_docs, additive=False)
+            # Quick cluster selection buttons (Always selects from current visible documents)
+            if not st.session_state['selected_ids']:
+                st.caption('Quick select cluster:')
+                cluster_cols = st.columns(min(5, len(cluster_stats)))
+                for idx, (cluster_id, row) in enumerate(cluster_stats.head(5).iterrows()):
+                    with cluster_cols[idx]:
+                        if st.button(f'Cluster {cluster_id} ({int(row["Count"])})', key=f'select_cluster_{cluster_id}', use_container_width=True):
+                            cluster_docs = df_work[df_work['cluster'] == cluster_id]['doc_id'].tolist()
+                            update_selection(cluster_docs, additive=False)
 
     st.markdown('---')
     
@@ -1324,6 +1378,7 @@ with tab_analyze:
     # Distance Heatmap for Selected Points
     if len(st.session_state['selected_ids']) >= 2:
         with st.expander('Distance Heatmap (Selected Points)', expanded=True):
+            st.caption('Visualizes how similar each selected document is to every other. Green = Very Similar, Red = Different.')
             selected_df = df_work[df_work['doc_id'].isin(st.session_state['selected_ids'])]
             if len(selected_df) <= 100:  # Increased limit for larger heatmaps
                 selected_indices = [id_to_local_idx.get(doc_id) for doc_id in st.session_state['selected_ids'] if doc_id in id_to_local_idx]
@@ -1357,7 +1412,7 @@ with tab_analyze:
 
 
 with tab_compare:
-    st.header('Document Comparison', help='Side-by-side comparison of any two documents from the filtered subset.')
+    st.header('Document Comparison', help='Compare two documents side-by-side to understand why they are similar or different.')
     st.caption('Compare two documents to see their similarity scores and nearest neighbors. This tool operates on the *filtered* dataset, independent of the lasso selection (unless you filter by selection ids).')
     
     if len(st.session_state.get('selected_ids', [])) >= 2:
@@ -1400,8 +1455,8 @@ with tab_compare:
 
     metrics = compute_pair_metrics(doc_a, doc_b)
     metric_col1, metric_col2 = st.columns(2)
-    metric_col1.metric('Cosine similarity', f"{metrics['cosine']:.3f}" if metrics else 'N/A', help='Measures how similar the content/topic is (1.0 = identical; 0.0 = unrelated). Focuses on direction/angle, ignoring length.')
-    metric_col2.metric('Euclidean distance', f"{metrics['euclidean']:.3f}" if metrics else 'N/A', help='Measures the literal distance between points (0.0 = identical). Closer points are more similar in all aspects (magnitude + direction).')
+    metric_col1.metric('Cosine similarity', f"{metrics['cosine']:.3f}" if metrics else 'N/A', help='Similarity in MEANING. 1.0 = Same meaning. 0.0 = Completely unrelated.')
+    metric_col2.metric('Euclidean distance', f"{metrics['euclidean']:.3f}" if metrics else 'N/A', help='Straight-line distance. 0.0 = Identical points. Larger numbers = More different.')
 
     def render_doc_panel(doc_id, column):
         column.subheader(doc_id or 'Select a document')
@@ -1422,7 +1477,7 @@ with tab_compare:
     render_doc_panel(doc_b, colB)
 
     st.markdown('---')
-    st.subheader('Nearest neighbors (current subset)')
+    st.subheader('Nearest neighbors (current subset)', help='The list of other documents that are most similar to this one.')
     # We want ~5 neighbors, but fetch +1 because the doc itself is usually included as distance 0
     neighbors_to_fetch = min(7, len(df_work))
     
