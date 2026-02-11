@@ -1,0 +1,10 @@
+think about your dashboard on different devices.
+---
+The areas of the dashboard that get the most attention are the top and down the left. Therefore this is where your most important information, visuals, and interactive elements should be used.
+---
+Before you start to present anything, you need to have a clear idea of why you are creating this dashboard and what information it needs to show.
+---
+Draw out your dashboard to get an idea of where everything should go.
+---
+Your goal is to create a dashboard that presents the data in a meaningful way that your readers can understand instantly
+---

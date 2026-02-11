@@ -1,5 +1,5 @@
 # Embedding Run Report
-_Generated: 2025-12-17T14:14:53_
+_Generated: 2026-02-08T21:38:14_
 
 ## Summary
 - Documents: 1491
@@ -20,7 +20,7 @@ _Generated: 2025-12-17T14:14:53_
 - [x] Vectorizer: artifacts/tfidf_vectorizer.pkl
 - [x] SVD/PCA coords: artifacts/coords.npy
 - [x] t-SNE coords: artifacts/coords_tsne.npy
-- [x] UMAP coords: artifacts/coords_umap.npy
+- [ ] UMAP coords: artifacts/coords_umap.npy
 - [x] NN indices: artifacts/nn_indices.npy
 - [x] NN distances: artifacts/nn_distances.npy
 - [x] Cluster labels: artifacts/cluster_labels.npy

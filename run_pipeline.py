@@ -116,9 +116,10 @@ def main():
                 axis_limits_b=umap_limits,
             )
 
-        # compute nearest neighbors on SVD coords (or fallback to TF-IDF reduced)
+        # compute nearest neighbors on high-dimensional TF-IDF (reduced to 50D SVD internally)
+        # NOT on the 2D scatterplot coordinates, which destroys semantic fidelity.
         nn_idx, nn_dist = compute_neighbors(
-            coords if coords is not None else X,
+            X,
             n_neighbors=10,
             metric=DIST_METRIC,
             algorithm='brute' if DIST_METRIC == 'cosine' else 'auto',

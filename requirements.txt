@@ -7,3 +7,6 @@ pytest
 nltk
 umap-learn
 hdbscan
+streamlit
+plotly
+streamlit-plotly-events
