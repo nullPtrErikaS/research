@@ -1,0 +1,21 @@
+id,text,label,category
+DUPE_A1,The quick brown fox jumps over the lazy dog near the river bank,duplicate,duplicates
+DUPE_A2,The quick brown fox jumps over the lazy dog near the river bank,duplicate,duplicates
+DUPE_A3,The quick brown fox jumps over the lazy dog near the river bank,duplicate,duplicates
+PARA_A1,A fast brown fox leaps over a sleepy dog by the riverside,paraphrase,paraphrases
+PARA_A2,The speedy brown fox hops over the tired dog beside the river,paraphrase,paraphrases
+SPORT_01,The soccer team scored three goals in the championship final match,sports,sports
+SPORT_02,Basketball players dribbled the ball down the court for a slam dunk,sports,sports
+SPORT_03,The tennis player served an ace to win the tournament grand final,sports,sports
+SPORT_04,Football coaches developed new offensive strategies for the playoff season,sports,sports
+SPORT_05,The baseball pitcher threw a perfect curveball for the third strike,sports,sports
+COOK_01,Chop onions and garlic then sauté them in olive oil until golden,cooking,cooking
+COOK_02,Preheat the oven to three hundred fifty degrees before baking the cake,cooking,cooking
+COOK_03,Whisk eggs and flour together to make a smooth pancake batter,cooking,cooking
+COOK_04,Season the grilled chicken with rosemary thyme and black pepper,cooking,cooking
+COOK_05,Simmer the tomato sauce on low heat for twenty minutes until thick,cooking,cooking
+OUTLIER_01,Quantum entanglement allows particles to share states across vast cosmological distances instantaneously,outlier,outlier
+OUTLIER_02,The cryptocurrency blockchain uses distributed ledger technology for decentralized financial transactions,outlier,outlier
+MIXED_01,The team celebrated their cooking competition victory with a championship trophy,mixed,mixed
+MIXED_02,Athletes need proper nutrition including proteins and vegetables for peak performance,mixed,mixed
+MIXED_03,The coach taught players how to chop through defensive lines efficiently,mixed,mixed
