@@ -1,8 +1,8 @@
 # Embedding Run Report
-_Generated: 2026-02-08T21:38:14_
+_Generated: 2026-02-15T15:54:07_
 
 ## Summary
-- Documents: 1491
+- Documents: 1128
 - Clusters: 8 (column `cluster`)
 
 ## Plots
@@ -20,7 +20,7 @@ _Generated: 2026-02-08T21:38:14_
 - [x] Vectorizer: artifacts/tfidf_vectorizer.pkl
 - [x] SVD/PCA coords: artifacts/coords.npy
 - [x] t-SNE coords: artifacts/coords_tsne.npy
-- [ ] UMAP coords: artifacts/coords_umap.npy
+- [x] UMAP coords: artifacts/coords_umap.npy
 - [x] NN indices: artifacts/nn_indices.npy
 - [x] NN distances: artifacts/nn_distances.npy
 - [x] Cluster labels: artifacts/cluster_labels.npy

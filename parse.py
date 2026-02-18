@@ -85,8 +85,14 @@ def load_corpus(filepath):
         pd.DataFrame with an added `doc_id` column (doc_0000, doc_0001, ...).
     """
     df = pd.read_csv(filepath)
-    # create a simple stable id for each row, useful for plotting/lookup
-    df['doc_id'] = [f"doc_{i:04d}" for i in range(len(df))]
+    # Use existing ID if available, otherwise create one
+    if 'id' in df.columns:
+        df['doc_id'] = df['id'].astype(str)
+    elif 'doc_id' in df.columns:
+        df['doc_id'] = df['doc_id'].astype(str)
+    else:
+        # create a simple stable id for each row
+        df['doc_id'] = [f"doc_{i:04d}" for i in range(len(df))]
     print(f"Loaded {len(df)} docs")
     return df
 
@@ -108,8 +114,19 @@ def basic_clean(text):
     return text
 
 
-def normalize_corpus(df, text_col='Full Guideline'):
+def normalize_corpus(df, text_col=None):
     """Apply cleaning to text column"""
+    if text_col is None:
+        # Attempt to auto-detect common text columns
+        for candidate in ['text', 'Full Guideline', 'content', 'BODY']:
+            if candidate in df.columns:
+                text_col = candidate
+                break
+    
+    if text_col is None:
+        raise KeyError("Could not find a suitable text column (checked: text, Full Guideline, content)")
+
+    print(f"Normalizing text from column: {text_col}")
     df['cleaned_text'] = df[text_col].apply(basic_clean)
     non_empty = (df['cleaned_text'] != '').sum()
     print(f"Cleaned {non_empty}/{len(df)} non-empty texts")
@@ -546,7 +563,7 @@ if __name__ == "__main__":
     setup_dirs()
     
     # load and clean
-    df = load_corpus('all_guidelines.csv')
+    df = load_corpus('artifacts/full_dataset_with_new_id.csv')
     df = normalize_corpus(df)
 
     # preprocess

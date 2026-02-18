@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "short-text-embedding-explorer"
+version = "0.1.0"
+description = "Exploration framework for always comparing DR methods on short text."
+authors = [{ name = "Author Name", email = "author@example.com" }]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "scipy",
+    "matplotlib",
+    "pytest",
+    "nltk",
+    "umap-learn",
+    "hdbscan",
+    "streamlit",
+    "plotly",
+    "streamlit-plotly-events"
+]
+keywords = ["data-visualization", "nlp", "embeddings", "streamlit", "research-tool", "dimensionality-reduction"]
+
+[project.urls]
+"Homepage" = "https://github.com/nullPtrErikaS/research"
+"Bug Tracker" = "https://github.com/nullPtrErikaS/research/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--verbose --color=yes"

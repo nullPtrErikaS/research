@@ -23,7 +23,7 @@ def main():
     # ensure expected directories exist
     setup_dirs()
 
-    df = load_corpus('all_guidelines.csv')
+    df = load_corpus('artifacts/full_dataset_with_new_id.csv')
     df = normalize_corpus(df)
     df = preprocess_texts(df)
 
