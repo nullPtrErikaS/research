@@ -70,7 +70,7 @@ alignment_notes = []
 
 
 @st.cache_data
-def try_load(path):
+def try_load(path, mtime=None):
     try:
         if path.endswith('.npy'):
             return np.load(path)
@@ -429,10 +429,13 @@ candidate_parent_cols = [c for c in df.columns if 'parent' in c.lower() or 'doc_
 
 
 # Load coordinates (if present) otherwise make fake 2D projections
-coords_tsne = try_load(coords_tsne_path) if coords_tsne_path else None
-coords_umap = try_load(coords_umap_path) if coords_umap_path else None
-coords_base = try_load(coords_pca_path) if coords_pca_path else None
-tfidf_matrix = try_load(tfidf_matrix_path) if tfidf_matrix_path else None
+def get_mtime(p):
+    return os.path.getmtime(p) if p and os.path.exists(p) else 0
+
+coords_tsne = try_load(coords_tsne_path, get_mtime(coords_tsne_path)) if coords_tsne_path else None
+coords_umap = try_load(coords_umap_path, get_mtime(coords_umap_path)) if coords_umap_path else None
+coords_base = try_load(coords_pca_path, get_mtime(coords_pca_path)) if coords_pca_path else None
+tfidf_matrix = try_load(tfidf_matrix_path, get_mtime(tfidf_matrix_path)) if tfidf_matrix_path else None
 
 # read doc_ids list if available to align .npy indices
 doc_ids_list = None
@@ -533,11 +536,19 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, 
     
     if color_mode == 'Cluster':
         if 'cluster' in df_plot.columns:
-            df_plot['cluster_str'] = df_plot['cluster'].astype(str)
+            # Bugfix: map to consistent colors for each cluster
+            cluster_counts = df_plot['cluster'].value_counts().to_dict()
+            df_plot['cluster_str'] = df_plot['cluster'].apply(lambda c: f'Cluster {c} (n={cluster_counts.get(c, 0)})')
             color_col = 'cluster_str'
+            palette = px.colors.qualitative.Plotly
+            cluster_color_map = {
+                f'Cluster {c} (n={n})': palette[int(c) % len(palette)]
+                for c, n in cluster_counts.items()
+            }
         else:
             df_plot['__status'] = 'Other'
             color_col = '__status'
+            cluster_color_map = {'Other': '#457B9D'}
         
         if selected_ids:
             df_plot.loc[df_plot['doc_id'].isin(selected_ids), '__size'] = 14
@@ -552,10 +563,10 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, 
             x=xcol,
             y=ycol,
             color=color_col,
+            color_discrete_map=cluster_color_map,
             hover_name='doc_id',
             hover_data=hover_cols,
             custom_data=['doc_id'],
-            color_discrete_sequence=px.colors.qualitative.Plotly,
         )
     else:
         # Color by selection status
@@ -573,8 +584,8 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, 
             df_plot.loc[df_plot['doc_id'].isin(focused_ids), '__size'] = 16
         
         color_map = {
-            'Focused': '#2ECC71',        # Bright emerald green
-            'Selected': '#E63946',       # Rich red
+            'Focused': '#E63946',        # Unified red
+            'Selected': '#E63946',       # Unified red
             'Search hit': '#F4A261',     # Warm orange
             'Other': '#457B9D'           # Deep blue-gray
         }
@@ -638,7 +649,7 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, 
                 mode='markers',
                 marker=dict(
                     size=14,
-                    color='#2ECC71',
+                    color='#E63946',
                     opacity=1.0,
                     symbol='diamond',
                     line=dict(width=2.5, color='white')
@@ -652,7 +663,7 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, 
     fig.update_layout(
         title=dict(
             text=title,
-            font=dict(size=14, family="Arial, sans-serif", color="#666666"),
+            font=dict(size=18, family="Arial, sans-serif", color="#333333"),
             x=0.5,
             xanchor='center',
             y=0.02,  # Position at bottom
@@ -671,8 +682,8 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, 
             x=1,
             title=None
         ),
-        xaxis=dict(showgrid=True, gridwidth=0.5, gridcolor='#E0E0E0'),
-        yaxis=dict(showgrid=True, gridwidth=0.5, gridcolor='#E0E0E0'),
+        xaxis=dict(title="Projection Dimension 1", showgrid=True, gridwidth=0.5, gridcolor='#E0E0E0', scaleanchor="y", scaleratio=1, range=[-1.1, 1.1]),
+        yaxis=dict(title="Projection Dimension 2", showgrid=True, gridwidth=0.5, gridcolor='#E0E0E0', scaleanchor="x", scaleratio=1, range=[-1.1, 1.1]),
         autosize=True  # Enable responsive sizing
     )
     return fig
@@ -844,6 +855,7 @@ with st.sidebar:
         clusters = sorted(df['cluster'].unique().tolist()) if 'cluster' in df.columns else []
         cluster_filter = st.multiselect('Clusters', options=clusters, default=clusters, help="Filter data by topic group. Uncheck a cluster number to hide its documents from the view.")
         keyword_filter = st.multiselect('Keyword tags', options=available_keywords, default=[], help='Filter the visible points to only those containing specific keywords. Useful for narrowing down to a theme.')
+        keyword_logic_selection = st.radio("Keyword Logic", ["OR (match any)", "AND (match all)"], index=0, horizontal=True)
         
         st.markdown('**Metadata Filters**')
         cat_defaults = [c for c in ['Data Domain', 'Tool Used/Mentioned', 'Publisher'] if c in categorical_metadata]
@@ -958,14 +970,17 @@ with st.sidebar:
         
         # Export selection
         if st.session_state['selected_ids']:
+            st.markdown('**Download Selection**')
+            n_download = st.number_input('Limit download items count', min_value=1, max_value=max(1, len(st.session_state['selected_ids'])), value=len(st.session_state['selected_ids']), step=1)
+            download_ids = st.session_state['selected_ids'][:n_download]
             import json
             export_data = {
-                'selected_ids': st.session_state['selected_ids'],
-                'count': len(st.session_state['selected_ids']),
+                'selected_ids': download_ids,
+                'count': len(download_ids),
                 'timestamp': pd.Timestamp.now().isoformat()
             }
             st.download_button(
-                label='Export Selection (JSON)',
+                label=f'Export {len(download_ids)} items (JSON)',
                 data=json.dumps(export_data, indent=2),
                 file_name='selected_docs.json',
                 mime='application/json',
@@ -973,17 +988,16 @@ with st.sidebar:
             )
             
             # Export Filtered CSV
-            csv_data = df[df['doc_id'].isin(st.session_state['selected_ids'])]
+            csv_data = df[df['doc_id'].isin(download_ids)]
             if not csv_data.empty:
                csv_string = csv_data.to_csv(index=False)
                st.download_button(
-                   label='Export Selection (CSV)',
+                   label=f'Export {len(download_ids)} items (CSV)',
                    data=csv_string,
                    file_name='selected_data.csv',
                    mime='text/csv',
                    use_container_width=True
                )
-
     with st.expander('Sessions & Advanced', expanded=False):
         st.markdown('**Sessions**')
         # ... (rest of session code) ...
@@ -1120,7 +1134,10 @@ if 'cluster' in df_work.columns and cluster_filter:
     df_work = df_work[df_work['cluster'].isin(cluster_filter)]
 if keyword_filter:
     lowered_keywords = [kw.lower() for kw in keyword_filter]
-    df_work = df_work[df_work['__tokens'].apply(lambda toks: any(kw in toks for kw in lowered_keywords))]
+    if "AND" in keyword_logic_selection:
+        df_work = df_work[df_work['__tokens'].apply(lambda toks: all(kw in toks for kw in lowered_keywords))]
+    else:
+        df_work = df_work[df_work['__tokens'].apply(lambda toks: any(kw in toks for kw in lowered_keywords))]
 for col, values in metadata_filters.items():
     df_work = df_work[df_work[col].astype(str).isin(values)]
 for col, (low, high) in numeric_ranges.items():
@@ -1352,6 +1369,15 @@ try:
 except Exception:
     df_work['pca_x'] = np.zeros(len(df_work))
     df_work['pca_y'] = np.zeros(len(df_work))
+
+# Normalize all coordinate scales consistently to [-1, 1] for uniform graph representations
+for c in ['tsne_x', 'tsne_y', 'umap_x', 'umap_y', 'pca_x', 'pca_y']:
+    if c in df_work.columns and len(df_work) > 0:
+        c_min, c_max = df_work[c].min(), df_work[c].max()
+        if c_max > c_min:
+            df_work[c] = (df_work[c] - c_min) / (c_max - c_min) * 2 - 1
+        elif c_max == c_min:
+            df_work[c] = 0.0
 
 hover_cols = build_hover_columns(df_work)
 if not detailed_hover:
