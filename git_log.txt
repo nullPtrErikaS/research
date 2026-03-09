@@ -1,0 +1,29 @@
+commit 72cd52ac4f6de8f815bdb28686b2509f4c7109e9
+Author: unknown <ebasy22@gmail.com>
+Date:   Tue Mar 3 22:43:28 2026 -0600
+
+    uniformed graph scale
+
+commit 3eed489146f890cfad4b05de7c2b1541ea9a177d
+Author: Wolf Fang 5000 <ebasy22@gmail.com>
+Date:   Wed Feb 18 04:03:27 2026 -0600
+
+    test data
+
+commit 95175831fd24f0b70ad18401e58cfbb81600664e
+Author: Wolf Fang 5000 <ebasy22@gmail.com>
+Date:   Wed Feb 18 03:53:11 2026 -0600
+
+    updated ui
+
+commit b61d75dd2c27b506bd3f867b0a9a78223a7f1e7c
+Author: Wolf Fang 5000 <ebasy22@gmail.com>
+Date:   Wed Feb 11 10:56:34 2026 -0600
+
+    added better tool tips
+
+commit a2b75fb03b58b1d2c340bca86b46093bc89b53d4
+Author: Wolf Fang 5000 <ebasy22@gmail.com>
+Date:   Wed Feb 11 09:41:26 2026 -0600
+
+    updated ui
