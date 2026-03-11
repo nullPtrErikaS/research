@@ -756,8 +756,8 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, 
             x=1,
             title=None
         ),
-        xaxis=dict(title="Projection Dimension 1", showgrid=True, gridwidth=0.5, gridcolor='#E0E0E0', scaleanchor="y", scaleratio=1, range=[-1.1, 1.1]),
-        yaxis=dict(title="Projection Dimension 2", showgrid=True, gridwidth=0.5, gridcolor='#E0E0E0', scaleanchor="x", scaleratio=1, range=[-1.1, 1.1]),
+        xaxis=dict(title=f"{title} Dim 1", showgrid=True, gridwidth=0.5, gridcolor='#E0E0E0', scaleanchor="y", scaleratio=1, range=[-1.1, 1.1]),
+        yaxis=dict(title=f"{title} Dim 2", showgrid=True, gridwidth=0.5, gridcolor='#E0E0E0', scaleanchor="x", scaleratio=1, range=[-1.1, 1.1]),
         autosize=True  # Enable responsive sizing
     )
     return fig
