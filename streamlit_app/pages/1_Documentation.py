@@ -1,9 +1,9 @@
 import streamlit as st
 import os
 
-st.set_page_config(page_title="Documentation - Embeddings Explorer", page_icon="📖", layout="wide")
+st.set_page_config(page_title="Documentation - Embeddings Explorer", layout="wide")
 
-st.title("📖 Embeddings Explorer Documentation")
+st.title("Embeddings Explorer Documentation")
 
 st.markdown("""
 Welcome to the Embeddings Explorer! This interactive application helps you map, analyze, and explore the relationships within your short-text dataset using advanced natural language processing (NLP) and dimensionality reduction (PCA, t-SNE, UMAP).

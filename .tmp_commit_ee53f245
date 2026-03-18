@@ -1,0 +1,185 @@
+﻿commit ee53f2456ec74145204b719409b4cfc9bd1ba275
+Author: unknown <ebasy22@gmail.com>
+Date:   Wed Mar 11 12:18:34 2026 -0500
+
+    changed selection layout
+
+diff --git a/streamlit_app/__pycache__/streamlit_app.cpython-313.pyc b/streamlit_app/__pycache__/streamlit_app.cpython-313.pyc
+index 6592a7b..46072be 100644
+Binary files a/streamlit_app/__pycache__/streamlit_app.cpython-313.pyc and b/streamlit_app/__pycache__/streamlit_app.cpython-313.pyc differ
+diff --git a/streamlit_app/streamlit_app.py b/streamlit_app/streamlit_app.py
+index 692aabb..9b6a48a 100644
+--- a/streamlit_app/streamlit_app.py
++++ b/streamlit_app/streamlit_app.py
+@@ -714,10 +714,10 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols,
+                            m_colors.append('#F4A261')
+                            m_symbols.append('star')
+                         else:
+-                           opacities.append(0.35) # moderately faded
+-                           sizes.append(5)
+-                           l_widths.append(0.5)
+-                           l_colors.append('rgba(0,0,0,0.2)')
++                           opacities.append(0.05) # heavily faded
++                           sizes.append(3)
++                           l_widths.append(0.0)
++                           l_colors.append('rgba(0,0,0,0.0)')
+                            m_colors.append(base_color)
+                            m_symbols.append('circle')
+                     trace.marker.opacity = opacities
+@@ -909,8 +909,8 @@ with st.sidebar:
+ 
+         color_mode = st.radio(
+             'Color points by:',
+-            options=['Selection', 'Cluster', 'Cohort'],
+-            help='Switch between showing selection status (Red/Blue), semantic clusters (Multi-color), or saved Cohorts.'
++            options=['Selection', 'Cluster', 'Saved Group'],
++            help='Switch between showing selection status (Red/Blue), semantic clusters (Multi-color), or Saved Groups.'
+         )
+         
+         st.markdown('**Visual Tweaks**')
+@@ -956,14 +956,14 @@ with st.sidebar:
+             numeric_ranges[col] = (low, high)
+         max_points = st.slider('Max points to display', min_value=50, max_value=3000, value=1200, step=50, help="Reduce this number if the app feels slow. Limits how many dots are drawn.")
+ 
+-    # Cohort Management (Persistent Selection)
+-    with st.expander('Saved Cohorts', expanded=True):
++    # Saved Group Management (Persistent Selection)
++    with st.expander('Saved Groups', expanded=True):
+         if 'saved_cohorts' not in st.session_state:
+             st.session_state['saved_cohorts'] = {}
+         
+         # Save current selection
+         current_sel_len = len(st.session_state['selected_ids'])
+-        new_cohort_name = st.text_input('New cohort name', placeholder='e.g., Outliers, Group A')
++        new_cohort_name = st.text_input('New saved group name', placeholder='e.g., Outliers, Group A')
+         if st.button('Save current selection') and new_cohort_name and current_sel_len > 0:
+             st.session_state['saved_cohorts'][new_cohort_name] = list(st.session_state['selected_ids'])
+             st.success(f"Saved {current_sel_len} docs to '{new_cohort_name}'")
+@@ -971,7 +971,7 @@ with st.sidebar:
+ 
+         # Display saved cohorts
+         if st.session_state['saved_cohorts']:
+-            st.markdown('**Cohorts**')
++            st.markdown('**Saved Groups**')
+             cohorts_to_delete = []
+             for name, ids in st.session_state['saved_cohorts'].items():
+                 c1, c2, c3 = st.columns([3, 1, 1])
+@@ -989,7 +989,7 @@ with st.sidebar:
+                     del st.session_state['saved_cohorts'][name]
+                 st.rerun()
+         else:
+-            st.caption("No saved cohorts yet.")
++            st.caption("No saved groups yet.")
+ 
+     with st.expander('Selection Tools', expanded=False):
+         st.markdown('**Quick Jumps**')
+@@ -1494,9 +1494,43 @@ if len(df_work) < len(df):
+ tab_explore = st.container()
+ 
+ with tab_explore:
+-    # Color mapping for Cohorts
+-    if color_mode == 'Cohort':
+-        # Assign colors to cohorts if active
++    # --- PERSISTENT SELECTION CONTROL BAR ---
++    sel_count = len(st.session_state.get('selected_ids', []))
++    if sel_count > 0:
++        st.markdown(f"**Selection:** `{sel_count}` docs selected")
++        bc1, bc2, bc3, bc4 = st.columns([1, 1, 1, 2])
++        with bc1:
++            if st.button('Clear Selection', use_container_width=True, key='top_clear'):
++                update_selection([], additive=False)
++                st.rerun()
++        with bc2:
++            with st.popover("Save Group", use_container_width=True):
++                if 'saved_cohorts' not in st.session_state:
++                    st.session_state['saved_cohorts'] = {}
++                sg_name = st.text_input("Group Name", key='top_sg_name')
++                if st.button("Confirm Save", key='top_sg_save'):
++                    if sg_name:
++                        st.session_state['saved_cohorts'][sg_name] = list(st.session_state['selected_ids'])
++                        st.success("Saved!")
++        with bc3:
++            if st.button("Undo", use_container_width=True, key='top_undo', disabled=len(st.session_state.get('selection_history', [])) <= 0):
++                history = st.session_state.get('selection_history', [])
++                if history:
++                    st.session_state['selected_ids'] = history.pop()
++                    st.session_state['selection_history'] = history
++                    st.rerun()
++        with bc4:
++            if st.session_state.get('selection_history'):
++                with st.popover("Selection History", use_container_width=True):
++                    for i, past_sel in enumerate(reversed(st.session_state['selection_history'][-5:])):
++                        if st.button(f"Step -{i+1}: {len(past_sel)} docs", key=f"top_hist_{i}"):
++                            st.session_state['selected_ids'] = past_sel
++                            st.rerun()
++        st.markdown("---")
++
++    # Color mapping for Saved Groups
++    if color_mode == 'Saved Group':
++        # Assign colors to groups if active
+         df_work['__cohort'] = 'Other'
+         cohort_map = st.session_state.get('saved_cohorts', {})
+         # Simple color cycle
+@@ -1820,9 +1854,19 @@ def render_selection_details(selected_ids):
+         
+         # Metrics
+         metrics = compute_pair_metrics(doc_a, doc_b)
+-        c1, c2 = st.columns(2)
++        c1, c2, c3 = st.columns(3)
+         c1.metric('Cosine Similarity', f"{metrics['cosine']:.3f}" if metrics else 'N/A', help="1.0 = Identical meaning")
+         c2.metric('Euclidean Dist', f"{metrics['euclidean']:.3f}" if metrics else 'N/A', help="Lower is closer")
++
++        # Projectual Distance (Diagnose projection vs original space)
++        if metrics:
++            row_a, row_b = df_work[df_work['doc_id'] == doc_a], df_work[df_work['doc_id'] == doc_b]
++            if not row_a.empty and not row_b.empty:
++                def p_dist(col_x, col_y):
++                    return np.sqrt((row_a.iloc[0][col_x]-row_b.iloc[0][col_x])**2 + (row_a.iloc[0][col_y]-row_b.iloc[0][col_y])**2)
++                p_dist_str = f"t-SNE: {p_dist('tsne_x', 'tsne_y'):.2f} | UMAP: {p_dist('umap_x', 'umap_y'):.2f} | PCA: {p_dist('pca_x', 'pca_y'):.2f}"
++                c3.caption("Projection Dists:")
++                c3.write(p_dist_str)
+         
+         # Side-by-Side Content
+         colA, colB = st.columns(2)
+@@ -1831,6 +1875,41 @@ def render_selection_details(selected_ids):
+         with colB:
+             render_doc_card(doc_b)
+             
++        if 'row_a' in locals() and 'row_b' in locals() and not row_a.empty and not row_b.empty:
++            toks_a = set(row_a.iloc[0].get('__tokens', []))
++            toks_b = set(row_b.iloc[0].get('__tokens', []))
++            shared = toks_a.intersection(toks_b)
++            if shared:
++                st.markdown(f"**Shared Terms**: `{'`, `'.join(sorted(shared)[:15])}`")
++            else:
++                st.caption("No shared terms found.")
++            
++        st.markdown("---")
++        st.markdown("#### Documents Between A and B")
++        st.caption("Finding the semantic gradient between these two documents...")
++        vec_a_idx, vec_a = fetch_vector(doc_a)
++        vec_b_idx, vec_b = fetch_vector(doc_b)
++        if vec_a is not None and vec_b is not None:
++             midpoint = (vec_a + vec_b) / 2.0
++             num_neighbors = min(8, len(df_work))
++             if num_neighbors > 0:
++                 nn_model = NearestNeighbors(metric='cosine', n_neighbors=num_neighbors).fit(embeddings_for_sim)
++                 dists, indices = nn_model.kneighbors(midpoint.reshape(1, -1))
++                 
++                 between_data = []
++                 for dist, i in zip(dists[0], indices[0]):
++                     if i < len(df_work):
++                         nid = df_work.iloc[i]['doc_id']
++                         if nid not in (doc_a, doc_b):
++                             sim = 1.0 - dist
++                             cluster = target_df[target_df['doc_id']==nid]['cluster'].iloc[0] if 'cluster' in target_df else 'N/A'
++                             between_data.append({'Doc ID': nid, 'Similarity to Midpoint': f"{sim:.3f}", 'Cluster': str(cluster)})
++                 
++                 if between_data:
++                     st.dataframe(pd.DataFrame(between_data), hide_index=True, use_container_width=True)
++                 else:
++                     st.write("No distinct documents found strictly between A and B.")
++            
+     else:
+         # MULTI-DOC MODE: show all selected docs
+         st.markdown("---")

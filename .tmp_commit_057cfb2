@@ -1,0 +1,1750 @@
+﻿commit 057cfb205f34237eb4f0f046094ed7fac1f18c5e
+Author: unknown <ebasy22@gmail.com>
+Date:   Mon Mar 9 00:46:56 2026 -0500
+
+    updates
+
+diff --git a/diff.txt b/diff.txt
+new file mode 100644
+index 0000000..9e88d5c
+--- /dev/null
++++ b/diff.txt
+@@ -0,0 +1,559 @@
++diff --git a/streamlit_app/streamlit_app.py b/streamlit_app/streamlit_app.py
++index 79409d4..692aabb 100644
++--- a/streamlit_app/streamlit_app.py
+++++ b/streamlit_app/streamlit_app.py
++@@ -306,11 +306,11 @@ def run_search(df_slice, query, scopes):
++ 
++ 
++ # Locate data files in the repo (flexible, with bundle preference)
++-processed_csv_path = find_file(bundle_candidates('full_dataset_with_new_id.csv') + bundle_candidates('processed_data_with_clusters.csv'))
+++processed_csv_path = find_file(bundle_candidates('processed_data_with_clusters.csv') + bundle_candidates('full_dataset_with_new_id.csv'))
++ 
++ # Consistency fix: determine if we should enforce a specific root based on the CSV found
++ forced_root = None
++-if processed_csv_path and 'full_dataset_with_new_id.csv' in processed_csv_path:
+++if processed_csv_path:
++     forced_root = os.path.dirname(processed_csv_path)
++ 
++ def aligned_candidates(filename):
++@@ -360,6 +360,9 @@ def load_and_process_data(csv_path, doc_ids_path_arg, _version=2):
++             df_local['doc_id'] = df_local['id'].astype(str)
++         else:
++             df_local['doc_id'] = df_local.index.astype(str)
+++            
+++    if 'cluster' not in df_local.columns:
+++        df_local['cluster'] = 0
++ 
++     df_local['doc_id'] = df_local['doc_id'].astype(str)
++     
++@@ -416,6 +419,22 @@ def load_and_process_data(csv_path, doc_ids_path_arg, _version=2):
++ # Execute cached loading
++ df, token_col, available_keywords = load_and_process_data(processed_csv_path, doc_ids_path)
++ 
+++@st.cache_data
+++def extract_cluster_topics(df_for_topics):
+++    topic_map = {}
+++    if 'cluster' in df_for_topics.columns and '__tokens' in df_for_topics.columns:
+++        from collections import Counter
+++        for c in df_for_topics['cluster'].unique():
+++            all_toks = [tok for toks in df_for_topics[df_for_topics['cluster'] == c]['__tokens'] for tok in toks]
+++            if all_toks:
+++                top_words = [kw for kw, _ in Counter(all_toks).most_common(3)]
+++                topic_map[c] = f"{c}: {', '.join(top_words)}"
+++            else:
+++                topic_map[c] = f"Cluster {c}"
+++    return topic_map
+++
+++GLOBAL_CLUSTER_MAP = extract_cluster_topics(df)
+++
++ # Metadata inference (fast enough to run every time or cache separately if needed)
++ NON_METADATA_COLUMNS = {
++     'doc_id', 'text', '__snippet', '__tokens', 'cleaned_text', 'preprocessed_text',
++@@ -528,22 +547,44 @@ if coords_umap is None:
++     coords_umap = PCA(n_components=2).fit_transform(base_embeddings + 0.01)
++ 
++ 
++-def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, color_mode='Selection', focused_ids=None):
+++def apply_scale_and_alpha(fig, alpha, scale):
+++    for trace in fig.data:
+++        if not hasattr(trace, 'marker') or trace.marker is None: continue
+++        # Safely scale size
+++        if isinstance(trace.marker.size, (list, tuple)):
+++            trace.marker.size = [s * scale for s in trace.marker.size]
+++        elif isinstance(trace.marker.size, (int, float)):
+++            trace.marker.size = trace.marker.size * scale
+++            
+++        # Safely apply opacity capping it smoothly across arrays and scalars
+++        if isinstance(trace.marker.opacity, (list, tuple)):
+++            # If trace already has an opacity array, blend it with the global alpha
+++            trace.marker.opacity = [min(1.0, o * alpha) for o in trace.marker.opacity]
+++        elif isinstance(trace.marker.opacity, (int, float)):
+++            trace.marker.opacity = min(1.0, trace.marker.opacity * alpha)
+++        else:
+++            trace.marker.opacity = alpha
+++
+++def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, color_mode='Selection', focused_ids=None, show_hover=True):
++     df_plot = df_plot.copy()
++     df_plot['__size'] = 8  # Default size
++     if focused_ids is None:
++         focused_ids = []
+++        
+++    hover_dict = {xcol: False, ycol: False}
+++    for col in hover_cols:
+++        hover_dict[col] = True
++     
++     if color_mode == 'Cluster':
++         if 'cluster' in df_plot.columns:
++             # Bugfix: map to consistent colors for each cluster
++             cluster_counts = df_plot['cluster'].value_counts().to_dict()
++-            df_plot['cluster_str'] = df_plot['cluster'].apply(lambda c: f'Cluster {c} (n={cluster_counts.get(c, 0)})')
+++            df_plot['cluster_str'] = df_plot['cluster'].apply(lambda c: f'{GLOBAL_CLUSTER_MAP.get(c, "Cluster " + str(c))} (n={cluster_counts.get(c, 0)})')
++             color_col = 'cluster_str'
++             palette = px.colors.qualitative.Plotly
++             cluster_color_map = {
++-                f'Cluster {c} (n={n})': palette[int(c) % len(palette)]
++-                for c, n in cluster_counts.items()
+++                f'{GLOBAL_CLUSTER_MAP.get(c, "Cluster " + str(c))} (n={n})': palette[i % len(palette)]
+++                for i, (c, n) in enumerate(cluster_counts.items())
++             }
++         else:
++             df_plot['__status'] = 'Other'
++@@ -565,7 +606,7 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols,
++             color=color_col,
++             color_discrete_map=cluster_color_map,
++             hover_name='doc_id',
++-            hover_data=hover_cols,
+++            hover_data=hover_dict,
++             custom_data=['doc_id'],
++         )
++     else:
++@@ -597,11 +638,14 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols,
++             color='__status',
++             color_discrete_map=color_map,
++             hover_name='doc_id',
++-            hover_data=hover_cols,
+++            hover_data=hover_dict,
++             custom_data=['doc_id'],
++             category_orders={'__status': ['Focused', 'Selected', 'Search hit', 'Other']}
++         )
++     
+++    if not show_hover:
+++        fig.update_traces(hoverinfo='none', hovertemplate=None)
+++        
++     fig.update_layout(
++         hoverlabel=dict(
++             bgcolor="rgba(255, 255, 255, 0.4)",
++@@ -619,46 +663,76 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols,
++                     trace.marker.size = 14
++                     trace.marker.opacity = 1.0
++                     trace.marker.line = dict(width=2.5, color='white')
++-                    trace.marker.symbol = 'diamond'
+++                    trace.marker.symbol = 'x'
++                     continue
++                 elif trace.name == 'Selected':
++                     trace.marker.size = 10
++                     trace.marker.opacity = 0.95
+++                    trace.marker.symbol = 'diamond'
++                 elif trace.name == 'Search hit':
++                     trace.marker.size = 9
++                     trace.marker.opacity = 0.9
+++                    trace.marker.symbol = 'star'
++                 else:
++                     trace.marker.size = 5
++                     trace.marker.opacity = 0.75
+++                    trace.marker.symbol = 'circle'
++             else:
++-                trace.marker.size = 6
++-                trace.marker.opacity = 0.85
++-            
++-            trace.marker.line = dict(width=0.8, color='rgba(0,0,0,0.4)')
+++                if selected_ids or search_ids or focused_ids:
+++                    # Dynamically fade unselected points and highlight selections
+++                    opacities = []
+++                    sizes = []
+++                    l_widths = []
+++                    l_colors = []
+++                    m_colors = []
+++                    m_symbols = []
+++                    base_color = getattr(trace.marker, 'color', '#457B9D')
+++                    if isinstance(base_color, (list, tuple)):
+++                        base_color = base_color[0] if len(base_color) > 0 else '#457B9D'
+++                        
+++                    for cdata in trace.customdata:
+++                        did = cdata[0]
+++                        if focused_ids and did in focused_ids:
+++                           opacities.append(1.0)
+++                           sizes.append(18)
+++                           l_widths.append(3)
+++                           l_colors.append('white')
+++                           m_colors.append('#E63946')
+++                           m_symbols.append('x')
+++                        elif selected_ids and did in selected_ids:
+++                           opacities.append(1.0)
+++                           sizes.append(14)
+++                           l_widths.append(2)
+++                           l_colors.append('white')
+++                           m_colors.append('#E63946')
+++                           m_symbols.append('diamond')
+++                        elif search_ids and did in search_ids:
+++                           opacities.append(1.0)
+++                           sizes.append(10)
+++                           l_widths.append(1.5)
+++                           l_colors.append('white')
+++                           m_colors.append('#F4A261')
+++                           m_symbols.append('star')
+++                        else:
+++                           opacities.append(0.35) # moderately faded
+++                           sizes.append(5)
+++                           l_widths.append(0.5)
+++                           l_colors.append('rgba(0,0,0,0.2)')
+++                           m_colors.append(base_color)
+++                           m_symbols.append('circle')
+++                    trace.marker.opacity = opacities
+++                    trace.marker.size = sizes
+++                    trace.marker.line = dict(width=l_widths, color=l_colors)
+++                    trace.marker.color = m_colors
+++                    trace.marker.symbol = m_symbols
+++                else:
+++                    trace.marker.size = 6
+++                    trace.marker.opacity = 0.85
+++                    trace.marker.line = dict(width=0.8, color='rgba(0,0,0,0.4)')
++     except Exception:
++         pass
++     
++-    # In cluster mode, add focused points as an overlay scatter for visibility
++-    if color_mode == 'Cluster' and focused_ids:
++-        foc_df = df_plot[df_plot['doc_id'].isin(focused_ids)]
++-        if not foc_df.empty:
++-            import plotly.graph_objects as go
++-            fig.add_trace(go.Scatter(
++-                x=foc_df[xcol],
++-                y=foc_df[ycol],
++-                mode='markers',
++-                marker=dict(
++-                    size=14,
++-                    color='#E63946',
++-                    opacity=1.0,
++-                    symbol='diamond',
++-                    line=dict(width=2.5, color='white')
++-                ),
++-                name='Focused',
++-                customdata=foc_df[['doc_id']].values,
++-                hoverinfo='text',
++-                hovertext=foc_df['doc_id'].tolist()
++-            ))
+++    # (Removed redundant overlay tracing for focused_ids since integrated into array logic)
++     
++     fig.update_layout(
++         title=dict(
++@@ -844,7 +918,7 @@ with st.sidebar:
++         point_size_scale = st.slider('Point Size', 0.5, 2.0, 1.0, 0.1)
++ 
++         show_download_buttons = st.checkbox('Show plot download buttons', value=False, help='Enable this to download high-resolution PNGs of the current plots for reports or presentations.')
++-        detailed_hover = st.checkbox('Show detailed hover info', value=True, help='If checked, hovering over a point shows rich metadata. Uncheck for a cleaner, faster view with just IDs.')
+++        show_hover = st.checkbox('Show tooltip on hover', value=True, help='Uncheck to completely hide the hover tooltips for a cleaner view.')
++ 
++     with st.expander('Search & Filter', expanded=False):
++         # Improved Search
++@@ -1380,18 +1454,6 @@ for c in ['tsne_x', 'tsne_y', 'umap_x', 'umap_y', 'pca_x', 'pca_y']:
++             df_work[c] = 0.0
++ 
++ hover_cols = build_hover_columns(df_work)
++-if not detailed_hover:
++-    # Minimal hover info as requested by user
++-    # Keep only the most critical identifier and grouping info
++-    hover_cols = ['doc_id']
++-    if 'Slogan' in df_work.columns:
++-        hover_cols.append('Slogan')
++-    if 'cluster' in df_work.columns:
++-        hover_cols.append('cluster')
++-    if 'Dashboard Type' in df_work.columns:
++-        hover_cols.append('Dashboard Type')
++-    # If a short snippet is very short, maybe include it?
++-    # But user asked to simplify "covering the screen", so stick to absolute minimum.
++ 
++ # Create index mapping for lookups (needed by heatmap and other features)
++ id_to_local_idx = {doc_id: idx for idx, doc_id in enumerate(df_work['doc_id'].tolist())}
++@@ -1456,6 +1518,11 @@ with tab_explore:
++     if st.session_state['selected_ids']:
++         # Last selected is usually the "inspection" target
++         primary_doc_id = st.session_state['selected_ids'][-1]
+++        
+++    selection_focus = None
+++    selection_tsne = None
+++    selection_umap = None
+++    selection_pca = None
++     
++     if view_mode == "Single (Focus)":
++         # Split layout: Large Plot + Inspector Panel
++@@ -1476,10 +1543,11 @@ with tab_explore:
++                 f"{focus_proj} Large View", 
++                 hover_cols, 
++                 color_mode,
++-                focused_ids=st.session_state.get('focused_ids', [])
+++                focused_ids=st.session_state.get('focused_ids', []),
+++                show_hover=show_hover
++             )
++-            # Update opacity/size if customizable
++-            fig_focus.update_traces(marker=dict(opacity=point_alpha, size=8 * point_size_scale))
+++            # Update opacity/size safely if customizable
+++            apply_scale_and_alpha(fig_focus, point_alpha, 1.2 * point_size_scale)
++ 
++             selection_focus = st.plotly_chart(
++                 fig_focus, 
++@@ -1531,116 +1599,101 @@ with tab_explore:
++                 st.write("Click a point ->")
++ 
++     else:
++-        # render plots vertically
++-        st.markdown("### t-SNE Projection")
++-        fig_tsne = make_plot(
++-            df_work,
++-            'tsne_x',
++-            'tsne_y',
++-            st.session_state['selected_ids'] or [],
++-            st.session_state.get('search_hits', []),
++-            't-SNE',
++-            hover_cols,
++-            color_mode,
++-            focused_ids=st.session_state.get('focused_ids', [])
++-        )
++-        # Apply visual tweaks
++-        fig_tsne.update_traces(marker=dict(opacity=point_alpha))
++-        for t in fig_tsne.data: t.marker.size = t.marker.size * point_size_scale
++-
++-        selection_tsne = st.plotly_chart(
++-            fig_tsne, 
++-            use_container_width=True, 
++-            on_select="rerun", 
++-            selection_mode=['points', 'box', 'lasso'],
++-            key=f"chart_tsne_{st.session_state['chart_revisions']['chart_tsne']}"
++-        )
+++        # Fully flat, side-by-side projections for maximum visibility and comparative analysis
+++        st.markdown("### Projections")
+++        plot_col1, plot_col2, plot_col3 = st.columns(3, gap="small")
++         
++-        if show_download_buttons:
++-            st.download_button(
++-                label='Download t-SNE',
++-                data=fig_tsne.to_html(),
++-                file_name='tsne_plot.html',
++-                mime='text/html',
++-                use_container_width=True
+++        with plot_col1:
+++            fig_tsne = make_plot(
+++                df_work, 'tsne_x', 'tsne_y',
+++                st.session_state['selected_ids'] or [],
+++                st.session_state.get('search_hits', []),
+++                't-SNE', hover_cols, color_mode,
+++                focused_ids=st.session_state.get('focused_ids', []),
+++                show_hover=show_hover
++             )
++-
++-        st.markdown("### UMAP Projection")
++-        fig_umap = make_plot(
++-            df_work,
++-            'umap_x',
++-            'umap_y',
++-            st.session_state['selected_ids'] or [],
++-            st.session_state.get('search_hits', []),
++-            'UMAP',
++-            hover_cols,
++-            color_mode,
++-            focused_ids=st.session_state.get('focused_ids', [])
++-        )
++-        # Apply visual tweaks
++-        fig_umap.update_traces(marker=dict(opacity=point_alpha))
++-        for t in fig_umap.data: t.marker.size = t.marker.size * point_size_scale
++-
++-        selection_umap = st.plotly_chart(
++-            fig_umap,
++-            use_container_width=True,
++-            on_select="rerun",
++-            selection_mode=['points', 'box', 'lasso'],
++-            key=f"chart_umap_{st.session_state['chart_revisions']['chart_umap']}"
++-        )
++-        
++-        if show_download_buttons:
++-            st.download_button(
++-                label='Download UMAP',
++-                data=fig_umap.to_html(),
++-                file_name='umap_plot.html',
++-                mime='text/html',
++-                use_container_width=True
+++            apply_scale_and_alpha(fig_tsne, point_alpha, point_size_scale)
+++            
+++            selection_tsne = st.plotly_chart(
+++                fig_tsne, use_container_width=True, on_select="rerun", 
+++                selection_mode=['points', 'box', 'lasso'],
+++                key=f"chart_tsne_{st.session_state['chart_revisions']['chart_tsne']}"
++             )
++-
++-        st.markdown("### PCA Projection")
++-        fig_pca = make_plot(
++-            df_work,
++-            'pca_x',
++-            'pca_y',
++-            st.session_state['selected_ids'] or [],
++-            st.session_state.get('search_hits', []),
++-            'PCA (preview)',
++-            hover_cols,
++-            color_mode,
++-            focused_ids=st.session_state.get('focused_ids', [])
++-        )
++-        # Apply visual tweaks
++-        fig_pca.update_traces(marker=dict(opacity=point_alpha))
++-        for t in fig_pca.data: t.marker.size = t.marker.size * point_size_scale
++-        
++-        selection_pca = st.plotly_chart(
++-            fig_pca,
++-            use_container_width=True,
++-            on_select="rerun",
++-            selection_mode=['points', 'box', 'lasso'],
++-            key=f"chart_pca_{st.session_state['chart_revisions']['chart_pca']}"
++-        )
+++            if show_download_buttons:
+++                st.download_button(
+++                    label='Download t-SNE', data=fig_tsne.to_html(),
+++                    file_name='tsne_plot.html', mime='text/html', use_container_width=True
+++                )
++         
++-        if show_download_buttons:
++-            st.download_button(
++-                label='Download PCA',
++-                data=fig_pca.to_html(),
++-                file_name='pca_plot.html',
++-                mime='text/html',
++-                use_container_width=True
+++        with plot_col2:
+++            fig_umap = make_plot(
+++                df_work, 'umap_x', 'umap_y',
+++                st.session_state['selected_ids'] or [],
+++                st.session_state.get('search_hits', []),
+++                'UMAP', hover_cols, color_mode,
+++                focused_ids=st.session_state.get('focused_ids', []),
+++                show_hover=show_hover
++             )
++-        try:
++-            if st.sidebar.checkbox('Show raw PCA Plotly (debug)', value=False):
++-                st.plotly_chart(fig_pca, use_container_width=True)
++-        except Exception:
++-            pass
+++            apply_scale_and_alpha(fig_umap, point_alpha, point_size_scale)
+++            
+++            selection_umap = st.plotly_chart(
+++                fig_umap, use_container_width=True, on_select="rerun", 
+++                selection_mode=['points', 'box', 'lasso'],
+++                key=f"chart_umap_{st.session_state['chart_revisions']['chart_umap']}"
+++            )
+++            if show_download_buttons:
+++                st.download_button(
+++                    label='Download UMAP', data=fig_umap.to_html(),
+++                    file_name='umap_plot.html', mime='text/html', use_container_width=True
+++                )
+++                
+++        with plot_col3:
+++            fig_pca = make_plot(
+++                df_work, 'pca_x', 'pca_y',
+++                st.session_state['selected_ids'] or [],
+++                st.session_state.get('search_hits', []),
+++                'PCA (preview)', hover_cols, color_mode,
+++                focused_ids=st.session_state.get('focused_ids', []),
+++                show_hover=show_hover
+++            )
+++            apply_scale_and_alpha(fig_pca, point_alpha, point_size_scale)
+++            
+++            selection_pca = st.plotly_chart(
+++                fig_pca, use_container_width=True, on_select="rerun", 
+++                selection_mode=['points', 'box', 'lasso'],
+++                key=f"chart_pca_{st.session_state['chart_revisions']['chart_pca']}"
+++            )
+++            if show_download_buttons:
+++                st.download_button(
+++                    label='Download PCA', data=fig_pca.to_html(),
+++                    file_name='pca_plot.html', mime='text/html', use_container_width=True
+++                )
+++
+++# ΓöÇΓöÇ Process Graph Selections ΓöÇΓöÇ
+++current_graph_selections = set()
+++for sel in [selection_focus, selection_tsne, selection_umap, selection_pca]:
+++    if sel and hasattr(sel, 'selection') and hasattr(sel.selection, 'points'):
+++        for pt in sel.selection.points:
+++            # pt acts like a dictionary in 1.35+
+++            cdata = pt.get('customdata', [])
+++            if cdata:
+++                current_graph_selections.add(str(cdata[0]))
+++
+++if current_graph_selections:
+++    last_graph = st.session_state.get('last_graph_selections', set())
+++    if current_graph_selections != last_graph:
+++        st.session_state['last_graph_selections'] = set(current_graph_selections)
+++        # We replace the current selection with the new lasso selection completely
+++        update_selection(list(current_graph_selections))
+++        st.rerun()
++ 
++-st.markdown("---")
+++# ΓöÇΓöÇ Dynamic Grid Layout for Analysis Section ΓöÇΓöÇ
+++if view_mode == "Single (Focus)":
+++    st.markdown("---")
++ 
++-# ΓöÇΓöÇ Analysis Section ΓöÇΓöÇ
++-# Use tabs to organize analysis views instead of a long vertical scroll
++-tab_docs, tab_stats, tab_keywords = st.tabs(["Selected Documents", "Cluster Stats", "Top Keywords"])
+++st.markdown("### Analysis")
+++# Use a 3-column span instead of hidden tabs so everything is accessible at once
+++tab_docs, tab_stats, tab_keywords = st.columns([2, 1, 1], gap="medium")
++ 
++ def render_selection_details(selected_ids):
++     st.subheader('Selected Document Details')
++@@ -1866,22 +1919,30 @@ with tab_stats:
++                 'doc_id': 'count',
++             }).round(2)
++             cluster_stats.columns = ['Count']
++-            cluster_stats = cluster_stats.sort_values('Count', ascending=False)
+++            cluster_stats = cluster_stats.sort_values('Count', ascending=True) # Ascending for top-down descending layout
+++            
+++            plot_df = cluster_stats.reset_index()
+++            # Ensure clusters always read beautifully on the layout
+++            plot_df['cluster_label'] = plot_df['cluster'].apply(lambda x: GLOBAL_CLUSTER_MAP.get(x, f'Cluster {x}'))
++             
++             fig_cluster = px.bar(
++-                cluster_stats.reset_index(),
++-                x='cluster',
++-                y='Count',
+++                plot_df,
+++                text='Count',
+++                y='cluster_label',
+++                x='Count',
+++                orientation='h',
++                 color='Count',
++                 color_continuous_scale='Blues',
++             )
++             fig_cluster.update_layout(
++                 margin=dict(l=10, r=10, t=10, b=10),
++-                height=300,
++-                xaxis_title='Cluster',
++-                yaxis_title='Documents',
+++                height=350,
+++                xaxis_title='Documents',
+++                yaxis_title='',
+++                yaxis=dict(type='category', dtick=1),
++                 coloraxis_showscale=False,
++             )
+++            fig_cluster.update_traces(textposition='auto')
++             st.plotly_chart(fig_cluster, use_container_width=True)
++             
++             if not st.session_state['selected_ids']:
++@@ -1902,12 +1963,14 @@ with tab_keywords:
++         all_toks = [tok for toks in sel_df['__tokens'] for tok in toks]
++         if all_toks:
++             from collections import Counter
++-            counts = Counter(all_toks).most_common(30)
++-            kw_df = pd.DataFrame(counts, columns=['Term', 'Count'])
+++            counts = Counter(all_toks).most_common(20) # Trim space
+++            kw_df = pd.DataFrame(counts, columns=['Term', 'Count']).sort_values('Count', ascending=True)
++             fig_kw = px.bar(
++                 kw_df,
++-                x='Term',
++-                y='Count',
+++                text='Count',
+++                y='Term',
+++                x='Count',
+++                orientation='h',
++                 color='Count',
++                 color_continuous_scale='Viridis',
++             )
++@@ -1916,9 +1979,12 @@ with tab_keywords:
++                 margin=dict(l=10, r=10, t=10, b=10),
++                 showlegend=False,
++                 coloraxis_showscale=False,
++-                xaxis_tickangle=-45,
+++                yaxis=dict(type='category', dtick=1),
+++                yaxis_title='',
+++                xaxis_title='Count',
++                 bargap=0.3,
++             )
+++            fig_kw.update_traces(textposition='auto')
++             st.plotly_chart(fig_kw, use_container_width=True)
++         else:
++             st.info("No tokens available. Try clearing cache (Γï« ΓåÆ Clear cache).")
+diff --git a/git_diff.txt b/git_diff.txt
+new file mode 100644
+index 0000000..9e88d5c
+--- /dev/null
++++ b/git_diff.txt
+@@ -0,0 +1,559 @@
++diff --git a/streamlit_app/streamlit_app.py b/streamlit_app/streamlit_app.py
++index 79409d4..692aabb 100644
++--- a/streamlit_app/streamlit_app.py
+++++ b/streamlit_app/streamlit_app.py
++@@ -306,11 +306,11 @@ def run_search(df_slice, query, scopes):
++ 
++ 
++ # Locate data files in the repo (flexible, with bundle preference)
++-processed_csv_path = find_file(bundle_candidates('full_dataset_with_new_id.csv') + bundle_candidates('processed_data_with_clusters.csv'))
+++processed_csv_path = find_file(bundle_candidates('processed_data_with_clusters.csv') + bundle_candidates('full_dataset_with_new_id.csv'))
++ 
++ # Consistency fix: determine if we should enforce a specific root based on the CSV found
++ forced_root = None
++-if processed_csv_path and 'full_dataset_with_new_id.csv' in processed_csv_path:
+++if processed_csv_path:
++     forced_root = os.path.dirname(processed_csv_path)
++ 
++ def aligned_candidates(filename):
++@@ -360,6 +360,9 @@ def load_and_process_data(csv_path, doc_ids_path_arg, _version=2):
++             df_local['doc_id'] = df_local['id'].astype(str)
++         else:
++             df_local['doc_id'] = df_local.index.astype(str)
+++            
+++    if 'cluster' not in df_local.columns:
+++        df_local['cluster'] = 0
++ 
++     df_local['doc_id'] = df_local['doc_id'].astype(str)
++     
++@@ -416,6 +419,22 @@ def load_and_process_data(csv_path, doc_ids_path_arg, _version=2):
++ # Execute cached loading
++ df, token_col, available_keywords = load_and_process_data(processed_csv_path, doc_ids_path)
++ 
+++@st.cache_data
+++def extract_cluster_topics(df_for_topics):
+++    topic_map = {}
+++    if 'cluster' in df_for_topics.columns and '__tokens' in df_for_topics.columns:
+++        from collections import Counter
+++        for c in df_for_topics['cluster'].unique():
+++            all_toks = [tok for toks in df_for_topics[df_for_topics['cluster'] == c]['__tokens'] for tok in toks]
+++            if all_toks:
+++                top_words = [kw for kw, _ in Counter(all_toks).most_common(3)]
+++                topic_map[c] = f"{c}: {', '.join(top_words)}"
+++            else:
+++                topic_map[c] = f"Cluster {c}"
+++    return topic_map
+++
+++GLOBAL_CLUSTER_MAP = extract_cluster_topics(df)
+++
++ # Metadata inference (fast enough to run every time or cache separately if needed)
++ NON_METADATA_COLUMNS = {
++     'doc_id', 'text', '__snippet', '__tokens', 'cleaned_text', 'preprocessed_text',
++@@ -528,22 +547,44 @@ if coords_umap is None:
++     coords_umap = PCA(n_components=2).fit_transform(base_embeddings + 0.01)
++ 
++ 
++-def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, color_mode='Selection', focused_ids=None):
+++def apply_scale_and_alpha(fig, alpha, scale):
+++    for trace in fig.data:
+++        if not hasattr(trace, 'marker') or trace.marker is None: continue
+++        # Safely scale size
+++        if isinstance(trace.marker.size, (list, tuple)):
+++            trace.marker.size = [s * scale for s in trace.marker.size]
+++        elif isinstance(trace.marker.size, (int, float)):
+++            trace.marker.size = trace.marker.size * scale
+++            
+++        # Safely apply opacity capping it smoothly across arrays and scalars
+++        if isinstance(trace.marker.opacity, (list, tuple)):
+++            # If trace already has an opacity array, blend it with the global alpha
+++            trace.marker.opacity = [min(1.0, o * alpha) for o in trace.marker.opacity]
+++        elif isinstance(trace.marker.opacity, (int, float)):
+++            trace.marker.opacity = min(1.0, trace.marker.opacity * alpha)
+++        else:
+++            trace.marker.opacity = alpha
+++
+++def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, color_mode='Selection', focused_ids=None, show_hover=True):
++     df_plot = df_plot.copy()
++     df_plot['__size'] = 8  # Default size
++     if focused_ids is None:
++         focused_ids = []
+++        
+++    hover_dict = {xcol: False, ycol: False}
+++    for col in hover_cols:
+++        hover_dict[col] = True
++     
++     if color_mode == 'Cluster':
++         if 'cluster' in df_plot.columns:
++             # Bugfix: map to consistent colors for each cluster
++             cluster_counts = df_plot['cluster'].value_counts().to_dict()
++-            df_plot['cluster_str'] = df_plot['cluster'].apply(lambda c: f'Cluster {c} (n={cluster_counts.get(c, 0)})')
+++            df_plot['cluster_str'] = df_plot['cluster'].apply(lambda c: f'{GLOBAL_CLUSTER_MAP.get(c, "Cluster " + str(c))} (n={cluster_counts.get(c, 0)})')
++             color_col = 'cluster_str'
++             palette = px.colors.qualitative.Plotly
++             cluster_color_map = {
++-                f'Cluster {c} (n={n})': palette[int(c) % len(palette)]
++-                for c, n in cluster_counts.items()
+++                f'{GLOBAL_CLUSTER_MAP.get(c, "Cluster " + str(c))} (n={n})': palette[i % len(palette)]
+++                for i, (c, n) in enumerate(cluster_counts.items())
++             }
++         else:
++             df_plot['__status'] = 'Other'
++@@ -565,7 +606,7 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols,
++             color=color_col,
++             color_discrete_map=cluster_color_map,
++             hover_name='doc_id',
++-            hover_data=hover_cols,
+++            hover_data=hover_dict,
++             custom_data=['doc_id'],
++         )
++     else:
++@@ -597,11 +638,14 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols,
++             color='__status',
++             color_discrete_map=color_map,
++             hover_name='doc_id',
++-            hover_data=hover_cols,
+++            hover_data=hover_dict,
++             custom_data=['doc_id'],
++             category_orders={'__status': ['Focused', 'Selected', 'Search hit', 'Other']}
++         )
++     
+++    if not show_hover:
+++        fig.update_traces(hoverinfo='none', hovertemplate=None)
+++        
++     fig.update_layout(
++         hoverlabel=dict(
++             bgcolor="rgba(255, 255, 255, 0.4)",
++@@ -619,46 +663,76 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols,
++                     trace.marker.size = 14
++                     trace.marker.opacity = 1.0
++                     trace.marker.line = dict(width=2.5, color='white')
++-                    trace.marker.symbol = 'diamond'
+++                    trace.marker.symbol = 'x'
++                     continue
++                 elif trace.name == 'Selected':
++                     trace.marker.size = 10
++                     trace.marker.opacity = 0.95
+++                    trace.marker.symbol = 'diamond'
++                 elif trace.name == 'Search hit':
++                     trace.marker.size = 9
++                     trace.marker.opacity = 0.9
+++                    trace.marker.symbol = 'star'
++                 else:
++                     trace.marker.size = 5
++                     trace.marker.opacity = 0.75
+++                    trace.marker.symbol = 'circle'
++             else:
++-                trace.marker.size = 6
++-                trace.marker.opacity = 0.85
++-            
++-            trace.marker.line = dict(width=0.8, color='rgba(0,0,0,0.4)')
+++                if selected_ids or search_ids or focused_ids:
+++                    # Dynamically fade unselected points and highlight selections
+++                    opacities = []
+++                    sizes = []
+++                    l_widths = []
+++                    l_colors = []
+++                    m_colors = []
+++                    m_symbols = []
+++                    base_color = getattr(trace.marker, 'color', '#457B9D')
+++                    if isinstance(base_color, (list, tuple)):
+++                        base_color = base_color[0] if len(base_color) > 0 else '#457B9D'
+++                        
+++                    for cdata in trace.customdata:
+++                        did = cdata[0]
+++                        if focused_ids and did in focused_ids:
+++                           opacities.append(1.0)
+++                           sizes.append(18)
+++                           l_widths.append(3)
+++                           l_colors.append('white')
+++                           m_colors.append('#E63946')
+++                           m_symbols.append('x')
+++                        elif selected_ids and did in selected_ids:
+++                           opacities.append(1.0)
+++                           sizes.append(14)
+++                           l_widths.append(2)
+++                           l_colors.append('white')
+++                           m_colors.append('#E63946')
+++                           m_symbols.append('diamond')
+++                        elif search_ids and did in search_ids:
+++                           opacities.append(1.0)
+++                           sizes.append(10)
+++                           l_widths.append(1.5)
+++                           l_colors.append('white')
+++                           m_colors.append('#F4A261')
+++                           m_symbols.append('star')
+++                        else:
+++                           opacities.append(0.35) # moderately faded
+++                           sizes.append(5)
+++                           l_widths.append(0.5)
+++                           l_colors.append('rgba(0,0,0,0.2)')
+++                           m_colors.append(base_color)
+++                           m_symbols.append('circle')
+++                    trace.marker.opacity = opacities
+++                    trace.marker.size = sizes
+++                    trace.marker.line = dict(width=l_widths, color=l_colors)
+++                    trace.marker.color = m_colors
+++                    trace.marker.symbol = m_symbols
+++                else:
+++                    trace.marker.size = 6
+++                    trace.marker.opacity = 0.85
+++                    trace.marker.line = dict(width=0.8, color='rgba(0,0,0,0.4)')
++     except Exception:
++         pass
++     
++-    # In cluster mode, add focused points as an overlay scatter for visibility
++-    if color_mode == 'Cluster' and focused_ids:
++-        foc_df = df_plot[df_plot['doc_id'].isin(focused_ids)]
++-        if not foc_df.empty:
++-            import plotly.graph_objects as go
++-            fig.add_trace(go.Scatter(
++-                x=foc_df[xcol],
++-                y=foc_df[ycol],
++-                mode='markers',
++-                marker=dict(
++-                    size=14,
++-                    color='#E63946',
++-                    opacity=1.0,
++-                    symbol='diamond',
++-                    line=dict(width=2.5, color='white')
++-                ),
++-                name='Focused',
++-                customdata=foc_df[['doc_id']].values,
++-                hoverinfo='text',
++-                hovertext=foc_df['doc_id'].tolist()
++-            ))
+++    # (Removed redundant overlay tracing for focused_ids since integrated into array logic)
++     
++     fig.update_layout(
++         title=dict(
++@@ -844,7 +918,7 @@ with st.sidebar:
++         point_size_scale = st.slider('Point Size', 0.5, 2.0, 1.0, 0.1)
++ 
++         show_download_buttons = st.checkbox('Show plot download buttons', value=False, help='Enable this to download high-resolution PNGs of the current plots for reports or presentations.')
++-        detailed_hover = st.checkbox('Show detailed hover info', value=True, help='If checked, hovering over a point shows rich metadata. Uncheck for a cleaner, faster view with just IDs.')
+++        show_hover = st.checkbox('Show tooltip on hover', value=True, help='Uncheck to completely hide the hover tooltips for a cleaner view.')
++ 
++     with st.expander('Search & Filter', expanded=False):
++         # Improved Search
++@@ -1380,18 +1454,6 @@ for c in ['tsne_x', 'tsne_y', 'umap_x', 'umap_y', 'pca_x', 'pca_y']:
++             df_work[c] = 0.0
++ 
++ hover_cols = build_hover_columns(df_work)
++-if not detailed_hover:
++-    # Minimal hover info as requested by user
++-    # Keep only the most critical identifier and grouping info
++-    hover_cols = ['doc_id']
++-    if 'Slogan' in df_work.columns:
++-        hover_cols.append('Slogan')
++-    if 'cluster' in df_work.columns:
++-        hover_cols.append('cluster')
++-    if 'Dashboard Type' in df_work.columns:
++-        hover_cols.append('Dashboard Type')
++-    # If a short snippet is very short, maybe include it?
++-    # But user asked to simplify "covering the screen", so stick to absolute minimum.
++ 
++ # Create index mapping for lookups (needed by heatmap and other features)
++ id_to_local_idx = {doc_id: idx for idx, doc_id in enumerate(df_work['doc_id'].tolist())}
++@@ -1456,6 +1518,11 @@ with tab_explore:
++     if st.session_state['selected_ids']:
++         # Last selected is usually the "inspection" target
++         primary_doc_id = st.session_state['selected_ids'][-1]
+++        
+++    selection_focus = None
+++    selection_tsne = None
+++    selection_umap = None
+++    selection_pca = None
++     
++     if view_mode == "Single (Focus)":
++         # Split layout: Large Plot + Inspector Panel
++@@ -1476,10 +1543,11 @@ with tab_explore:
++                 f"{focus_proj} Large View", 
++                 hover_cols, 
++                 color_mode,
++-                focused_ids=st.session_state.get('focused_ids', [])
+++                focused_ids=st.session_state.get('focused_ids', []),
+++                show_hover=show_hover
++             )
++-            # Update opacity/size if customizable
++-            fig_focus.update_traces(marker=dict(opacity=point_alpha, size=8 * point_size_scale))
+++            # Update opacity/size safely if customizable
+++            apply_scale_and_alpha(fig_focus, point_alpha, 1.2 * point_size_scale)
++ 
++             selection_focus = st.plotly_chart(
++                 fig_focus, 
++@@ -1531,116 +1599,101 @@ with tab_explore:
++                 st.write("Click a point ->")
++ 
++     else:
++-        # render plots vertically
++-        st.markdown("### t-SNE Projection")
++-        fig_tsne = make_plot(
++-            df_work,
++-            'tsne_x',
++-            'tsne_y',
++-            st.session_state['selected_ids'] or [],
++-            st.session_state.get('search_hits', []),
++-            't-SNE',
++-            hover_cols,
++-            color_mode,
++-            focused_ids=st.session_state.get('focused_ids', [])
++-        )
++-        # Apply visual tweaks
++-        fig_tsne.update_traces(marker=dict(opacity=point_alpha))
++-        for t in fig_tsne.data: t.marker.size = t.marker.size * point_size_scale
++-
++-        selection_tsne = st.plotly_chart(
++-            fig_tsne, 
++-            use_container_width=True, 
++-            on_select="rerun", 
++-            selection_mode=['points', 'box', 'lasso'],
++-            key=f"chart_tsne_{st.session_state['chart_revisions']['chart_tsne']}"
++-        )
+++        # Fully flat, side-by-side projections for maximum visibility and comparative analysis
+++        st.markdown("### Projections")
+++        plot_col1, plot_col2, plot_col3 = st.columns(3, gap="small")
++         
++-        if show_download_buttons:
++-            st.download_button(
++-                label='Download t-SNE',
++-                data=fig_tsne.to_html(),
++-                file_name='tsne_plot.html',
++-                mime='text/html',
++-                use_container_width=True
+++        with plot_col1:
+++            fig_tsne = make_plot(
+++                df_work, 'tsne_x', 'tsne_y',
+++                st.session_state['selected_ids'] or [],
+++                st.session_state.get('search_hits', []),
+++                't-SNE', hover_cols, color_mode,
+++                focused_ids=st.session_state.get('focused_ids', []),
+++                show_hover=show_hover
++             )
++-
++-        st.markdown("### UMAP Projection")
++-        fig_umap = make_plot(
++-            df_work,
++-            'umap_x',
++-            'umap_y',
++-            st.session_state['selected_ids'] or [],
++-            st.session_state.get('search_hits', []),
++-            'UMAP',
++-            hover_cols,
++-            color_mode,
++-            focused_ids=st.session_state.get('focused_ids', [])
++-        )
++-        # Apply visual tweaks
++-        fig_umap.update_traces(marker=dict(opacity=point_alpha))
++-        for t in fig_umap.data: t.marker.size = t.marker.size * point_size_scale
++-
++-        selection_umap = st.plotly_chart(
++-            fig_umap,
++-            use_container_width=True,
++-            on_select="rerun",
++-            selection_mode=['points', 'box', 'lasso'],
++-            key=f"chart_umap_{st.session_state['chart_revisions']['chart_umap']}"
++-        )
++-        
++-        if show_download_buttons:
++-            st.download_button(
++-                label='Download UMAP',
++-                data=fig_umap.to_html(),
++-                file_name='umap_plot.html',
++-                mime='text/html',
++-                use_container_width=True
+++            apply_scale_and_alpha(fig_tsne, point_alpha, point_size_scale)
+++            
+++            selection_tsne = st.plotly_chart(
+++                fig_tsne, use_container_width=True, on_select="rerun", 
+++                selection_mode=['points', 'box', 'lasso'],
+++                key=f"chart_tsne_{st.session_state['chart_revisions']['chart_tsne']}"
++             )
++-
++-        st.markdown("### PCA Projection")
++-        fig_pca = make_plot(
++-            df_work,
++-            'pca_x',
++-            'pca_y',
++-            st.session_state['selected_ids'] or [],
++-            st.session_state.get('search_hits', []),
++-            'PCA (preview)',
++-            hover_cols,
++-            color_mode,
++-            focused_ids=st.session_state.get('focused_ids', [])
++-        )
++-        # Apply visual tweaks
++-        fig_pca.update_traces(marker=dict(opacity=point_alpha))
++-        for t in fig_pca.data: t.marker.size = t.marker.size * point_size_scale
++-        
++-        selection_pca = st.plotly_chart(
++-            fig_pca,
++-            use_container_width=True,
++-            on_select="rerun",
++-            selection_mode=['points', 'box', 'lasso'],
++-            key=f"chart_pca_{st.session_state['chart_revisions']['chart_pca']}"
++-        )
+++            if show_download_buttons:
+++                st.download_button(
+++                    label='Download t-SNE', data=fig_tsne.to_html(),
+++                    file_name='tsne_plot.html', mime='text/html', use_container_width=True
+++                )
++         
++-        if show_download_buttons:
++-            st.download_button(
++-                label='Download PCA',
++-                data=fig_pca.to_html(),
++-                file_name='pca_plot.html',
++-                mime='text/html',
++-                use_container_width=True
+++        with plot_col2:
+++            fig_umap = make_plot(
+++                df_work, 'umap_x', 'umap_y',
+++                st.session_state['selected_ids'] or [],
+++                st.session_state.get('search_hits', []),
+++                'UMAP', hover_cols, color_mode,
+++                focused_ids=st.session_state.get('focused_ids', []),
+++                show_hover=show_hover
++             )
++-        try:
++-            if st.sidebar.checkbox('Show raw PCA Plotly (debug)', value=False):
++-                st.plotly_chart(fig_pca, use_container_width=True)
++-        except Exception:
++-            pass
+++            apply_scale_and_alpha(fig_umap, point_alpha, point_size_scale)
+++            
+++            selection_umap = st.plotly_chart(
+++                fig_umap, use_container_width=True, on_select="rerun", 
+++                selection_mode=['points', 'box', 'lasso'],
+++                key=f"chart_umap_{st.session_state['chart_revisions']['chart_umap']}"
+++            )
+++            if show_download_buttons:
+++                st.download_button(
+++                    label='Download UMAP', data=fig_umap.to_html(),
+++                    file_name='umap_plot.html', mime='text/html', use_container_width=True
+++                )
+++                
+++        with plot_col3:
+++            fig_pca = make_plot(
+++                df_work, 'pca_x', 'pca_y',
+++                st.session_state['selected_ids'] or [],
+++                st.session_state.get('search_hits', []),
+++                'PCA (preview)', hover_cols, color_mode,
+++                focused_ids=st.session_state.get('focused_ids', []),
+++                show_hover=show_hover
+++            )
+++            apply_scale_and_alpha(fig_pca, point_alpha, point_size_scale)
+++            
+++            selection_pca = st.plotly_chart(
+++                fig_pca, use_container_width=True, on_select="rerun", 
+++                selection_mode=['points', 'box', 'lasso'],
+++                key=f"chart_pca_{st.session_state['chart_revisions']['chart_pca']}"
+++            )
+++            if show_download_buttons:
+++                st.download_button(
+++                    label='Download PCA', data=fig_pca.to_html(),
+++                    file_name='pca_plot.html', mime='text/html', use_container_width=True
+++                )
+++
+++# ΓöÇΓöÇ Process Graph Selections ΓöÇΓöÇ
+++current_graph_selections = set()
+++for sel in [selection_focus, selection_tsne, selection_umap, selection_pca]:
+++    if sel and hasattr(sel, 'selection') and hasattr(sel.selection, 'points'):
+++        for pt in sel.selection.points:
+++            # pt acts like a dictionary in 1.35+
+++            cdata = pt.get('customdata', [])
+++            if cdata:
+++                current_graph_selections.add(str(cdata[0]))
+++
+++if current_graph_selections:
+++    last_graph = st.session_state.get('last_graph_selections', set())
+++    if current_graph_selections != last_graph:
+++        st.session_state['last_graph_selections'] = set(current_graph_selections)
+++        # We replace the current selection with the new lasso selection completely
+++        update_selection(list(current_graph_selections))
+++        st.rerun()
++ 
++-st.markdown("---")
+++# ΓöÇΓöÇ Dynamic Grid Layout for Analysis Section ΓöÇΓöÇ
+++if view_mode == "Single (Focus)":
+++    st.markdown("---")
++ 
++-# ΓöÇΓöÇ Analysis Section ΓöÇΓöÇ
++-# Use tabs to organize analysis views instead of a long vertical scroll
++-tab_docs, tab_stats, tab_keywords = st.tabs(["Selected Documents", "Cluster Stats", "Top Keywords"])
+++st.markdown("### Analysis")
+++# Use a 3-column span instead of hidden tabs so everything is accessible at once
+++tab_docs, tab_stats, tab_keywords = st.columns([2, 1, 1], gap="medium")
++ 
++ def render_selection_details(selected_ids):
++     st.subheader('Selected Document Details')
++@@ -1866,22 +1919,30 @@ with tab_stats:
++                 'doc_id': 'count',
++             }).round(2)
++             cluster_stats.columns = ['Count']
++-            cluster_stats = cluster_stats.sort_values('Count', ascending=False)
+++            cluster_stats = cluster_stats.sort_values('Count', ascending=True) # Ascending for top-down descending layout
+++            
+++            plot_df = cluster_stats.reset_index()
+++            # Ensure clusters always read beautifully on the layout
+++            plot_df['cluster_label'] = plot_df['cluster'].apply(lambda x: GLOBAL_CLUSTER_MAP.get(x, f'Cluster {x}'))
++             
++             fig_cluster = px.bar(
++-                cluster_stats.reset_index(),
++-                x='cluster',
++-                y='Count',
+++                plot_df,
+++                text='Count',
+++                y='cluster_label',
+++                x='Count',
+++                orientation='h',
++                 color='Count',
++                 color_continuous_scale='Blues',
++             )
++             fig_cluster.update_layout(
++                 margin=dict(l=10, r=10, t=10, b=10),
++-                height=300,
++-                xaxis_title='Cluster',
++-                yaxis_title='Documents',
+++                height=350,
+++                xaxis_title='Documents',
+++                yaxis_title='',
+++                yaxis=dict(type='category', dtick=1),
++                 coloraxis_showscale=False,
++             )
+++            fig_cluster.update_traces(textposition='auto')
++             st.plotly_chart(fig_cluster, use_container_width=True)
++             
++             if not st.session_state['selected_ids']:
++@@ -1902,12 +1963,14 @@ with tab_keywords:
++         all_toks = [tok for toks in sel_df['__tokens'] for tok in toks]
++         if all_toks:
++             from collections import Counter
++-            counts = Counter(all_toks).most_common(30)
++-            kw_df = pd.DataFrame(counts, columns=['Term', 'Count'])
+++            counts = Counter(all_toks).most_common(20) # Trim space
+++            kw_df = pd.DataFrame(counts, columns=['Term', 'Count']).sort_values('Count', ascending=True)
++             fig_kw = px.bar(
++                 kw_df,
++-                x='Term',
++-                y='Count',
+++                text='Count',
+++                y='Term',
+++                x='Count',
+++                orientation='h',
++                 color='Count',
++                 color_continuous_scale='Viridis',
++             )
++@@ -1916,9 +1979,12 @@ with tab_keywords:
++                 margin=dict(l=10, r=10, t=10, b=10),
++                 showlegend=False,
++                 coloraxis_showscale=False,
++-                xaxis_tickangle=-45,
+++                yaxis=dict(type='category', dtick=1),
+++                yaxis_title='',
+++                xaxis_title='Count',
++                 bargap=0.3,
++             )
+++            fig_kw.update_traces(textposition='auto')
++             st.plotly_chart(fig_kw, use_container_width=True)
++         else:
++             st.info("No tokens available. Try clearing cache (Γï« ΓåÆ Clear cache).")
+diff --git a/git_log.txt b/git_log.txt
+new file mode 100644
+index 0000000..d5253cf
+--- /dev/null
++++ b/git_log.txt
+@@ -0,0 +1,29 @@
++commit 72cd52ac4f6de8f815bdb28686b2509f4c7109e9
++Author: unknown <ebasy22@gmail.com>
++Date:   Tue Mar 3 22:43:28 2026 -0600
++
++    uniformed graph scale
++
++commit 3eed489146f890cfad4b05de7c2b1541ea9a177d
++Author: Wolf Fang 5000 <ebasy22@gmail.com>
++Date:   Wed Feb 18 04:03:27 2026 -0600
++
++    test data
++
++commit 95175831fd24f0b70ad18401e58cfbb81600664e
++Author: Wolf Fang 5000 <ebasy22@gmail.com>
++Date:   Wed Feb 18 03:53:11 2026 -0600
++
++    updated ui
++
++commit b61d75dd2c27b506bd3f867b0a9a78223a7f1e7c
++Author: Wolf Fang 5000 <ebasy22@gmail.com>
++Date:   Wed Feb 11 10:56:34 2026 -0600
++
++    added better tool tips
++
++commit a2b75fb03b58b1d2c340bca86b46093bc89b53d4
++Author: Wolf Fang 5000 <ebasy22@gmail.com>
++Date:   Wed Feb 11 09:41:26 2026 -0600
++
++    updated ui
+diff --git a/git_status.txt b/git_status.txt
+new file mode 100644
+index 0000000..2fcaec7
+--- /dev/null
++++ b/git_status.txt
+@@ -0,0 +1,14 @@
++On branch main
++Your branch is up to date with 'origin/main'.
++
++Changes not staged for commit:
++  (use "git add <file>..." to update what will be committed)
++  (use "git restore <file>..." to discard changes in working directory)
++	modified:   streamlit_app/streamlit_app.py
++
++Untracked files:
++  (use "git add <file>..." to include in what will be committed)
++	diff.txt
++	git_status.txt
++
++no changes added to commit (use "git add" and/or "git commit -a")
+diff --git a/streamlit_app/streamlit_app.py b/streamlit_app/streamlit_app.py
+index 79409d4..692aabb 100644
+--- a/streamlit_app/streamlit_app.py
++++ b/streamlit_app/streamlit_app.py
+@@ -306,11 +306,11 @@ def run_search(df_slice, query, scopes):
+ 
+ 
+ # Locate data files in the repo (flexible, with bundle preference)
+-processed_csv_path = find_file(bundle_candidates('full_dataset_with_new_id.csv') + bundle_candidates('processed_data_with_clusters.csv'))
++processed_csv_path = find_file(bundle_candidates('processed_data_with_clusters.csv') + bundle_candidates('full_dataset_with_new_id.csv'))
+ 
+ # Consistency fix: determine if we should enforce a specific root based on the CSV found
+ forced_root = None
+-if processed_csv_path and 'full_dataset_with_new_id.csv' in processed_csv_path:
++if processed_csv_path:
+     forced_root = os.path.dirname(processed_csv_path)
+ 
+ def aligned_candidates(filename):
+@@ -360,6 +360,9 @@ def load_and_process_data(csv_path, doc_ids_path_arg, _version=2):
+             df_local['doc_id'] = df_local['id'].astype(str)
+         else:
+             df_local['doc_id'] = df_local.index.astype(str)
++            
++    if 'cluster' not in df_local.columns:
++        df_local['cluster'] = 0
+ 
+     df_local['doc_id'] = df_local['doc_id'].astype(str)
+     
+@@ -416,6 +419,22 @@ def load_and_process_data(csv_path, doc_ids_path_arg, _version=2):
+ # Execute cached loading
+ df, token_col, available_keywords = load_and_process_data(processed_csv_path, doc_ids_path)
+ 
++@st.cache_data
++def extract_cluster_topics(df_for_topics):
++    topic_map = {}
++    if 'cluster' in df_for_topics.columns and '__tokens' in df_for_topics.columns:
++        from collections import Counter
++        for c in df_for_topics['cluster'].unique():
++            all_toks = [tok for toks in df_for_topics[df_for_topics['cluster'] == c]['__tokens'] for tok in toks]
++            if all_toks:
++                top_words = [kw for kw, _ in Counter(all_toks).most_common(3)]
++                topic_map[c] = f"{c}: {', '.join(top_words)}"
++            else:
++                topic_map[c] = f"Cluster {c}"
++    return topic_map
++
++GLOBAL_CLUSTER_MAP = extract_cluster_topics(df)
++
+ # Metadata inference (fast enough to run every time or cache separately if needed)
+ NON_METADATA_COLUMNS = {
+     'doc_id', 'text', '__snippet', '__tokens', 'cleaned_text', 'preprocessed_text',
+@@ -528,22 +547,44 @@ if coords_umap is None:
+     coords_umap = PCA(n_components=2).fit_transform(base_embeddings + 0.01)
+ 
+ 
+-def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, color_mode='Selection', focused_ids=None):
++def apply_scale_and_alpha(fig, alpha, scale):
++    for trace in fig.data:
++        if not hasattr(trace, 'marker') or trace.marker is None: continue
++        # Safely scale size
++        if isinstance(trace.marker.size, (list, tuple)):
++            trace.marker.size = [s * scale for s in trace.marker.size]
++        elif isinstance(trace.marker.size, (int, float)):
++            trace.marker.size = trace.marker.size * scale
++            
++        # Safely apply opacity capping it smoothly across arrays and scalars
++        if isinstance(trace.marker.opacity, (list, tuple)):
++            # If trace already has an opacity array, blend it with the global alpha
++            trace.marker.opacity = [min(1.0, o * alpha) for o in trace.marker.opacity]
++        elif isinstance(trace.marker.opacity, (int, float)):
++            trace.marker.opacity = min(1.0, trace.marker.opacity * alpha)
++        else:
++            trace.marker.opacity = alpha
++
++def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, color_mode='Selection', focused_ids=None, show_hover=True):
+     df_plot = df_plot.copy()
+     df_plot['__size'] = 8  # Default size
+     if focused_ids is None:
+         focused_ids = []
++        
++    hover_dict = {xcol: False, ycol: False}
++    for col in hover_cols:
++        hover_dict[col] = True
+     
+     if color_mode == 'Cluster':
+         if 'cluster' in df_plot.columns:
+             # Bugfix: map to consistent colors for each cluster
+             cluster_counts = df_plot['cluster'].value_counts().to_dict()
+-            df_plot['cluster_str'] = df_plot['cluster'].apply(lambda c: f'Cluster {c} (n={cluster_counts.get(c, 0)})')
++            df_plot['cluster_str'] = df_plot['cluster'].apply(lambda c: f'{GLOBAL_CLUSTER_MAP.get(c, "Cluster " + str(c))} (n={cluster_counts.get(c, 0)})')
+             color_col = 'cluster_str'
+             palette = px.colors.qualitative.Plotly
+             cluster_color_map = {
+-                f'Cluster {c} (n={n})': palette[int(c) % len(palette)]
+-                for c, n in cluster_counts.items()
++                f'{GLOBAL_CLUSTER_MAP.get(c, "Cluster " + str(c))} (n={n})': palette[i % len(palette)]
++                for i, (c, n) in enumerate(cluster_counts.items())
+             }
+         else:
+             df_plot['__status'] = 'Other'
+@@ -565,7 +606,7 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols,
+             color=color_col,
+             color_discrete_map=cluster_color_map,
+             hover_name='doc_id',
+-            hover_data=hover_cols,
++            hover_data=hover_dict,
+             custom_data=['doc_id'],
+         )
+     else:
+@@ -597,11 +638,14 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols,
+             color='__status',
+             color_discrete_map=color_map,
+             hover_name='doc_id',
+-            hover_data=hover_cols,
++            hover_data=hover_dict,
+             custom_data=['doc_id'],
+             category_orders={'__status': ['Focused', 'Selected', 'Search hit', 'Other']}
+         )
+     
++    if not show_hover:
++        fig.update_traces(hoverinfo='none', hovertemplate=None)
++        
+     fig.update_layout(
+         hoverlabel=dict(
+             bgcolor="rgba(255, 255, 255, 0.4)",
+@@ -619,46 +663,76 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols,
+                     trace.marker.size = 14
+                     trace.marker.opacity = 1.0
+                     trace.marker.line = dict(width=2.5, color='white')
+-                    trace.marker.symbol = 'diamond'
++                    trace.marker.symbol = 'x'
+                     continue
+                 elif trace.name == 'Selected':
+                     trace.marker.size = 10
+                     trace.marker.opacity = 0.95
++                    trace.marker.symbol = 'diamond'
+                 elif trace.name == 'Search hit':
+                     trace.marker.size = 9
+                     trace.marker.opacity = 0.9
++                    trace.marker.symbol = 'star'
+                 else:
+                     trace.marker.size = 5
+                     trace.marker.opacity = 0.75
++                    trace.marker.symbol = 'circle'
+             else:
+-                trace.marker.size = 6
+-                trace.marker.opacity = 0.85
+-            
+-            trace.marker.line = dict(width=0.8, color='rgba(0,0,0,0.4)')
++                if selected_ids or search_ids or focused_ids:
++                    # Dynamically fade unselected points and highlight selections
++                    opacities = []
++                    sizes = []
++                    l_widths = []
++                    l_colors = []
++                    m_colors = []
++                    m_symbols = []
++                    base_color = getattr(trace.marker, 'color', '#457B9D')
++                    if isinstance(base_color, (list, tuple)):
++                        base_color = base_color[0] if len(base_color) > 0 else '#457B9D'
++                        
++                    for cdata in trace.customdata:
++                        did = cdata[0]
++                        if focused_ids and did in focused_ids:
++                           opacities.append(1.0)
++                           sizes.append(18)
++                           l_widths.append(3)
++                           l_colors.append('white')
++                           m_colors.append('#E63946')
++                           m_symbols.append('x')
++                        elif selected_ids and did in selected_ids:
++                           opacities.append(1.0)
++                           sizes.append(14)
++                           l_widths.append(2)
++                           l_colors.append('white')
++                           m_colors.append('#E63946')
++                           m_symbols.append('diamond')
++                        elif search_ids and did in search_ids:
++                           opacities.append(1.0)
++                           sizes.append(10)
++                           l_widths.append(1.5)
++                           l_colors.append('white')
++                           m_colors.append('#F4A261')
++                           m_symbols.append('star')
++                        else:
++                           opacities.append(0.35) # moderately faded
++                           sizes.append(5)
++                           l_widths.append(0.5)
++                           l_colors.append('rgba(0,0,0,0.2)')
++                           m_colors.append(base_color)
++                           m_symbols.append('circle')
++                    trace.marker.opacity = opacities
++                    trace.marker.size = sizes
++                    trace.marker.line = dict(width=l_widths, color=l_colors)
++                    trace.marker.color = m_colors
++                    trace.marker.symbol = m_symbols
++                else:
++                    trace.marker.size = 6
++                    trace.marker.opacity = 0.85
++                    trace.marker.line = dict(width=0.8, color='rgba(0,0,0,0.4)')
+     except Exception:
+         pass
+     
+-    # In cluster mode, add focused points as an overlay scatter for visibility
+-    if color_mode == 'Cluster' and focused_ids:
+-        foc_df = df_plot[df_plot['doc_id'].isin(focused_ids)]
+-        if not foc_df.empty:
+-            import plotly.graph_objects as go
+-            fig.add_trace(go.Scatter(
+-                x=foc_df[xcol],
+-                y=foc_df[ycol],
+-                mode='markers',
+-                marker=dict(
+-                    size=14,
+-                    color='#E63946',
+-                    opacity=1.0,
+-                    symbol='diamond',
+-                    line=dict(width=2.5, color='white')
+-                ),
+-                name='Focused',
+-                customdata=foc_df[['doc_id']].values,
+-                hoverinfo='text',
+-                hovertext=foc_df['doc_id'].tolist()
+-            ))
++    # (Removed redundant overlay tracing for focused_ids since integrated into array logic)
+     
+     fig.update_layout(
+         title=dict(
+@@ -844,7 +918,7 @@ with st.sidebar:
+         point_size_scale = st.slider('Point Size', 0.5, 2.0, 1.0, 0.1)
+ 
+         show_download_buttons = st.checkbox('Show plot download buttons', value=False, help='Enable this to download high-resolution PNGs of the current plots for reports or presentations.')
+-        detailed_hover = st.checkbox('Show detailed hover info', value=True, help='If checked, hovering over a point shows rich metadata. Uncheck for a cleaner, faster view with just IDs.')
++        show_hover = st.checkbox('Show tooltip on hover', value=True, help='Uncheck to completely hide the hover tooltips for a cleaner view.')
+ 
+     with st.expander('Search & Filter', expanded=False):
+         # Improved Search
+@@ -1380,18 +1454,6 @@ for c in ['tsne_x', 'tsne_y', 'umap_x', 'umap_y', 'pca_x', 'pca_y']:
+             df_work[c] = 0.0
+ 
+ hover_cols = build_hover_columns(df_work)
+-if not detailed_hover:
+-    # Minimal hover info as requested by user
+-    # Keep only the most critical identifier and grouping info
+-    hover_cols = ['doc_id']
+-    if 'Slogan' in df_work.columns:
+-        hover_cols.append('Slogan')
+-    if 'cluster' in df_work.columns:
+-        hover_cols.append('cluster')
+-    if 'Dashboard Type' in df_work.columns:
+-        hover_cols.append('Dashboard Type')
+-    # If a short snippet is very short, maybe include it?
+-    # But user asked to simplify "covering the screen", so stick to absolute minimum.
+ 
+ # Create index mapping for lookups (needed by heatmap and other features)
+ id_to_local_idx = {doc_id: idx for idx, doc_id in enumerate(df_work['doc_id'].tolist())}
+@@ -1456,6 +1518,11 @@ with tab_explore:
+     if st.session_state['selected_ids']:
+         # Last selected is usually the "inspection" target
+         primary_doc_id = st.session_state['selected_ids'][-1]
++        
++    selection_focus = None
++    selection_tsne = None
++    selection_umap = None
++    selection_pca = None
+     
+     if view_mode == "Single (Focus)":
+         # Split layout: Large Plot + Inspector Panel
+@@ -1476,10 +1543,11 @@ with tab_explore:
+                 f"{focus_proj} Large View", 
+                 hover_cols, 
+                 color_mode,
+-                focused_ids=st.session_state.get('focused_ids', [])
++                focused_ids=st.session_state.get('focused_ids', []),
++                show_hover=show_hover
+             )
+-            # Update opacity/size if customizable
+-            fig_focus.update_traces(marker=dict(opacity=point_alpha, size=8 * point_size_scale))
++            # Update opacity/size safely if customizable
++            apply_scale_and_alpha(fig_focus, point_alpha, 1.2 * point_size_scale)
+ 
+             selection_focus = st.plotly_chart(
+                 fig_focus, 
+@@ -1531,116 +1599,101 @@ with tab_explore:
+                 st.write("Click a point ->")
+ 
+     else:
+-        # render plots vertically
+-        st.markdown("### t-SNE Projection")
+-        fig_tsne = make_plot(
+-            df_work,
+-            'tsne_x',
+-            'tsne_y',
+-            st.session_state['selected_ids'] or [],
+-            st.session_state.get('search_hits', []),
+-            't-SNE',
+-            hover_cols,
+-            color_mode,
+-            focused_ids=st.session_state.get('focused_ids', [])
+-        )
+-        # Apply visual tweaks
+-        fig_tsne.update_traces(marker=dict(opacity=point_alpha))
+-        for t in fig_tsne.data: t.marker.size = t.marker.size * point_size_scale
+-
+-        selection_tsne = st.plotly_chart(
+-            fig_tsne, 
+-            use_container_width=True, 
+-            on_select="rerun", 
+-            selection_mode=['points', 'box', 'lasso'],
+-            key=f"chart_tsne_{st.session_state['chart_revisions']['chart_tsne']}"
+-        )
++        # Fully flat, side-by-side projections for maximum visibility and comparative analysis
++        st.markdown("### Projections")
++        plot_col1, plot_col2, plot_col3 = st.columns(3, gap="small")
+         
+-        if show_download_buttons:
+-            st.download_button(
+-                label='Download t-SNE',
+-                data=fig_tsne.to_html(),
+-                file_name='tsne_plot.html',
+-                mime='text/html',
+-                use_container_width=True
++        with plot_col1:
++            fig_tsne = make_plot(
++                df_work, 'tsne_x', 'tsne_y',
++                st.session_state['selected_ids'] or [],
++                st.session_state.get('search_hits', []),
++                't-SNE', hover_cols, color_mode,
++                focused_ids=st.session_state.get('focused_ids', []),
++                show_hover=show_hover
+             )
+-
+-        st.markdown("### UMAP Projection")
+-        fig_umap = make_plot(
+-            df_work,
+-            'umap_x',
+-            'umap_y',
+-            st.session_state['selected_ids'] or [],
+-            st.session_state.get('search_hits', []),
+-            'UMAP',
+-            hover_cols,
+-            color_mode,
+-            focused_ids=st.session_state.get('focused_ids', [])
+-        )
+-        # Apply visual tweaks
+-        fig_umap.update_traces(marker=dict(opacity=point_alpha))
+-        for t in fig_umap.data: t.marker.size = t.marker.size * point_size_scale
+-
+-        selection_umap = st.plotly_chart(
+-            fig_umap,
+-            use_container_width=True,
+-            on_select="rerun",
+-            selection_mode=['points', 'box', 'lasso'],
+-            key=f"chart_umap_{st.session_state['chart_revisions']['chart_umap']}"
+-        )
+-        
+-        if show_download_buttons:
+-            st.download_button(
+-                label='Download UMAP',
+-                data=fig_umap.to_html(),
+-                file_name='umap_plot.html',
+-                mime='text/html',
+-                use_container_width=True
++            apply_scale_and_alpha(fig_tsne, point_alpha, point_size_scale)
++            
++            selection_tsne = st.plotly_chart(
++                fig_tsne, use_container_width=True, on_select="rerun", 
++                selection_mode=['points', 'box', 'lasso'],
++                key=f"chart_tsne_{st.session_state['chart_revisions']['chart_tsne']}"
+             )
+-
+-        st.markdown("### PCA Projection")
+-        fig_pca = make_plot(
+-            df_work,
+-            'pca_x',
+-            'pca_y',
+-            st.session_state['selected_ids'] or [],
+-            st.session_state.get('search_hits', []),
+-            'PCA (preview)',
+-            hover_cols,
+-            color_mode,
+-            focused_ids=st.session_state.get('focused_ids', [])
+-        )
+-        # Apply visual tweaks
+-        fig_pca.update_traces(marker=dict(opacity=point_alpha))
+-        for t in fig_pca.data: t.marker.size = t.marker.size * point_size_scale
+-        
+-        selection_pca = st.plotly_chart(
+-            fig_pca,
+-            use_container_width=True,
+-            on_select="rerun",
+-            selection_mode=['points', 'box', 'lasso'],
+-            key=f"chart_pca_{st.session_state['chart_revisions']['chart_pca']}"
+-        )
++            if show_download_buttons:
++                st.download_button(
++                    label='Download t-SNE', data=fig_tsne.to_html(),
++                    file_name='tsne_plot.html', mime='text/html', use_container_width=True
++                )
+         
+-        if show_download_buttons:
+-            st.download_button(
+-                label='Download PCA',
+-                data=fig_pca.to_html(),
+-                file_name='pca_plot.html',
+-                mime='text/html',
+-                use_container_width=True
++        with plot_col2:
++            fig_umap = make_plot(
++                df_work, 'umap_x', 'umap_y',
++                st.session_state['selected_ids'] or [],
++                st.session_state.get('search_hits', []),
++                'UMAP', hover_cols, color_mode,
++                focused_ids=st.session_state.get('focused_ids', []),
++                show_hover=show_hover
+             )
+-        try:
+-            if st.sidebar.checkbox('Show raw PCA Plotly (debug)', value=False):
+-                st.plotly_chart(fig_pca, use_container_width=True)
+-        except Exception:
+-            pass
++            apply_scale_and_alpha(fig_umap, point_alpha, point_size_scale)
++            
++            selection_umap = st.plotly_chart(
++                fig_umap, use_container_width=True, on_select="rerun", 
++                selection_mode=['points', 'box', 'lasso'],
++                key=f"chart_umap_{st.session_state['chart_revisions']['chart_umap']}"
++            )
++            if show_download_buttons:
++                st.download_button(
++                    label='Download UMAP', data=fig_umap.to_html(),
++                    file_name='umap_plot.html', mime='text/html', use_container_width=True
++                )
++                
++        with plot_col3:
++            fig_pca = make_plot(
++                df_work, 'pca_x', 'pca_y',
++                st.session_state['selected_ids'] or [],
++                st.session_state.get('search_hits', []),
++                'PCA (preview)', hover_cols, color_mode,
++                focused_ids=st.session_state.get('focused_ids', []),
++                show_hover=show_hover
++            )
++            apply_scale_and_alpha(fig_pca, point_alpha, point_size_scale)
++            
++            selection_pca = st.plotly_chart(
++                fig_pca, use_container_width=True, on_select="rerun", 
++                selection_mode=['points', 'box', 'lasso'],
++                key=f"chart_pca_{st.session_state['chart_revisions']['chart_pca']}"
++            )
++            if show_download_buttons:
++                st.download_button(
++                    label='Download PCA', data=fig_pca.to_html(),
++                    file_name='pca_plot.html', mime='text/html', use_container_width=True
++                )
++
++# ΓöÇΓöÇ Process Graph Selections ΓöÇΓöÇ
++current_graph_selections = set()
++for sel in [selection_focus, selection_tsne, selection_umap, selection_pca]:
++    if sel and hasattr(sel, 'selection') and hasattr(sel.selection, 'points'):
++        for pt in sel.selection.points:
++            # pt acts like a dictionary in 1.35+
++            cdata = pt.get('customdata', [])
++            if cdata:
++                current_graph_selections.add(str(cdata[0]))
++
++if current_graph_selections:
++    last_graph = st.session_state.get('last_graph_selections', set())
++    if current_graph_selections != last_graph:
++        st.session_state['last_graph_selections'] = set(current_graph_selections)
++        # We replace the current selection with the new lasso selection completely
++        update_selection(list(current_graph_selections))
++        st.rerun()
+ 
+-st.markdown("---")
++# ΓöÇΓöÇ Dynamic Grid Layout for Analysis Section ΓöÇΓöÇ
++if view_mode == "Single (Focus)":
++    st.markdown("---")
+ 
+-# ΓöÇΓöÇ Analysis Section ΓöÇΓöÇ
+-# Use tabs to organize analysis views instead of a long vertical scroll
+-tab_docs, tab_stats, tab_keywords = st.tabs(["Selected Documents", "Cluster Stats", "Top Keywords"])
++st.markdown("### Analysis")
++# Use a 3-column span instead of hidden tabs so everything is accessible at once
++tab_docs, tab_stats, tab_keywords = st.columns([2, 1, 1], gap="medium")
+ 
+ def render_selection_details(selected_ids):
+     st.subheader('Selected Document Details')
+@@ -1866,22 +1919,30 @@ with tab_stats:
+                 'doc_id': 'count',
+             }).round(2)
+             cluster_stats.columns = ['Count']
+-            cluster_stats = cluster_stats.sort_values('Count', ascending=False)
++            cluster_stats = cluster_stats.sort_values('Count', ascending=True) # Ascending for top-down descending layout
++            
++            plot_df = cluster_stats.reset_index()
++            # Ensure clusters always read beautifully on the layout
++            plot_df['cluster_label'] = plot_df['cluster'].apply(lambda x: GLOBAL_CLUSTER_MAP.get(x, f'Cluster {x}'))
+             
+             fig_cluster = px.bar(
+-                cluster_stats.reset_index(),
+-                x='cluster',
+-                y='Count',
++                plot_df,
++                text='Count',
++                y='cluster_label',
++                x='Count',
++                orientation='h',
+                 color='Count',
+                 color_continuous_scale='Blues',
+             )
+             fig_cluster.update_layout(
+                 margin=dict(l=10, r=10, t=10, b=10),
+-                height=300,
+-                xaxis_title='Cluster',
+-                yaxis_title='Documents',
++                height=350,
++                xaxis_title='Documents',
++                yaxis_title='',
++                yaxis=dict(type='category', dtick=1),
+                 coloraxis_showscale=False,
+             )
++            fig_cluster.update_traces(textposition='auto')
+             st.plotly_chart(fig_cluster, use_container_width=True)
+             
+             if not st.session_state['selected_ids']:
+@@ -1902,12 +1963,14 @@ with tab_keywords:
+         all_toks = [tok for toks in sel_df['__tokens'] for tok in toks]
+         if all_toks:
+             from collections import Counter
+-            counts = Counter(all_toks).most_common(30)
+-            kw_df = pd.DataFrame(counts, columns=['Term', 'Count'])
++            counts = Counter(all_toks).most_common(20) # Trim space
++            kw_df = pd.DataFrame(counts, columns=['Term', 'Count']).sort_values('Count', ascending=True)
+             fig_kw = px.bar(
+                 kw_df,
+-                x='Term',
+-                y='Count',
++                text='Count',
++                y='Term',
++                x='Count',
++                orientation='h',
+                 color='Count',
+                 color_continuous_scale='Viridis',
+             )
+@@ -1916,9 +1979,12 @@ with tab_keywords:
+                 margin=dict(l=10, r=10, t=10, b=10),
+                 showlegend=False,
+                 coloraxis_showscale=False,
+-                xaxis_tickangle=-45,
++                yaxis=dict(type='category', dtick=1),
++                yaxis_title='',
++                xaxis_title='Count',
+                 bargap=0.3,
+             )
++            fig_kw.update_traces(textposition='auto')
+             st.plotly_chart(fig_kw, use_container_width=True)
+         else:
+             st.info("No tokens available. Try clearing cache (Γï« ΓåÆ Clear cache).")
