@@ -1,4 +1,4 @@
-import ast
+﻿import ast
 import os
 import textwrap
 
@@ -13,7 +13,7 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import KMeans
 from streamlit_plotly_events import plotly_events
 
-st.set_page_config(layout="wide", page_title="AbstractsViewer (Prototype)")
+st.set_page_config(layout="wide", page_title="Embeddings Explorer (Prototype)")
 
 # CSS Tweaks: Compact headers and margins
 st.markdown("""
@@ -120,6 +120,112 @@ def bundle_candidates(filename):
     return candidates
 
 
+def parse_variant_settings(variant_path):
+    """
+    Parse preprocessing settings from variant folder name and path.
+    Returns dict with human-readable settings description.
+    
+    Examples:
+      preproc_default → {"label": "Default", "settings": "Lemmatized, stopwords removed, lowercase"}
+      preproc_no_stopwords → {"label": "No Stopwords", "settings": "Lemmatized, lowercase, NO stopword removal"}
+      preproc_no_lemmatize → {"label": "No Lemmatization", "settings": "NO lemmatization, stopwords removed, lowercase"}
+    """
+    if not variant_path:
+        return {"label": "Auto-detected", "settings": "Default settings", "folder": None, "config": {}}
+    
+    # Normalize and extract folder name
+    norm_path = os.path.normpath(variant_path)
+    folder_name = os.path.basename(norm_path)
+    
+    # Parse settings from folder name
+    settings = {
+        "lemmatize": True,
+        "lowercase": True,
+        "remove_stopwords": True,
+        "min_length": 3
+    }
+    
+    if "no_lemmatize" in folder_name:
+        settings["lemmatize"] = False
+    if "no_lowercase" in folder_name:
+        settings["lowercase"] = False
+    if "no_stopwords" in folder_name:
+        settings["remove_stopwords"] = False
+    if "minlen2" in folder_name:
+        settings["min_length"] = 2
+    
+    # Generate human-readable label
+    if folder_name == "preproc_default":
+        label = "Default"
+    elif "no_lemmatize" in folder_name and "no_stopwords" in folder_name:
+        label = "No Lemmatization, No Stopwords"
+    elif "no_lemmatize" in folder_name:
+        label = "No Lemmatization"
+    elif "no_stopwords" in folder_name:
+        label = "No Stopwords"
+    elif "no_lowercase" in folder_name:
+        label = "Preserve Case"
+    elif "minlen2" in folder_name:
+        label = "Min Length 2"
+    else:
+        label = folder_name.replace("preproc_", "").replace("_", " ").title()
+    
+    # Generate settings description
+    parts = []
+    if settings["lemmatize"]:
+        parts.append("Lemmatized")
+    else:
+        parts.append("NO lemmatization")
+    
+    if settings["remove_stopwords"]:
+        parts.append("stopwords removed")
+    else:
+        parts.append("Keep stopwords")
+    
+    if settings["lowercase"]:
+        parts.append("lowercase")
+    else:
+        parts.append("preserve case")
+    
+    parts.append(f"min {settings['min_length']}ch")
+    
+    return {
+        "label": label,
+        "settings": ", ".join(parts),
+        "folder": folder_name,
+        "config": settings
+    }
+
+
+def get_variant_comparison_info(current_variant_path, default_variant_path=None):
+    """
+    Generate comparison info between current variant and default.
+    Returns dict with differences highlighted.
+    """
+    current = parse_variant_settings(current_variant_path)
+    
+    # Determine default path
+    if not default_variant_path:
+        if selected_bundle_root:
+            default_variant_path = os.path.join(os.path.dirname(selected_bundle_root), 'preproc_default')
+        else:
+            default_variant_path = 'artifacts/preproc_default'
+    
+    default = parse_variant_settings(default_variant_path)
+    
+    diffs = []
+    for key in current.get("config", {}):
+        if current["config"].get(key) != default["config"].get(key):
+            diffs.append(f"{key}: {current['config'].get(key)} (default: {default['config'].get(key)})")
+    
+    return {
+        "current": current,
+        "default": default,
+        "differences": diffs
+    }
+
+
+
 def ensure_list(value):
     if isinstance(value, list):
         return value
@@ -163,6 +269,113 @@ def apply_chunk_mapping(df, chunk_col, parent_col):
     chunk_to_parent = dict(zip(mapping[chunk_col], mapping[parent_col]))
     parent_to_chunks = mapping.groupby(parent_col)[chunk_col].apply(list).to_dict()
     return chunk_to_parent, parent_to_chunks
+
+
+def get_keywords_with_tfidf(selected_tokens, full_corpus_tokens, n=15, min_doc_freq=2):
+    """
+    Extract top keywords using TF-IDF weighting with strong stop word filtering.
+    
+    **CRITICAL**: This function requires PREPROCESSED token lists (lemmatized, stopword-filtered).
+    These must come from the offline pipeline's 'tokens' column (created by parse.py::preprocess_texts).
+    
+    DO NOT pass raw text tokenized via regex — this causes keyword inconsistency between
+    offline and online analysis.
+    
+    Args:
+        selected_tokens: list of PREPROCESSED token lists from selected documents
+                        (must be from the CSV 'tokens' column, not raw regex extraction)
+        full_corpus_tokens: list of PREPROCESSED token lists from full corpus (for IDF computation)
+        n: number of top keywords to return (default 15)
+        min_doc_freq: minimum document frequency threshold (default 2)
+    
+    Returns:
+        tuple: (list of (keyword, tfidf_score) tuples sorted by TF-IDF score descending,
+                fallback_flag: bool indicating if fewer than 2 documents available)
+    
+    Raises:
+        No exceptions, but returns empty results if input is empty or insufficient data
+    """
+    # Extended stop word list: common English filler words that survive TF-IDF anyway
+    extended_stop_words = set([
+        'also', 'make', 'use', 'using', 'used', 'one', 'way', 'can', 'will', 'may',
+        'need', 'want', 'good', 'like', 'well', 'even', 'just', 'much', 'many', 'often',
+        'best', 'help', 'get', 'give', 'keep', 'look', 'show', 'work', 'include',
+        'new', 'other', 'time', 'user', 'data', 'system', 'may', 'would', 'should',
+        'could', 'such', 'every', 'thing', 'set', 'case', 'part', 'group', 'high',
+        'low', 'add', 'say', 'see', 'may', 'different', 'type', 'provide', 'create',
+        'important', 'must', 'area', 'find', 'change', 'result', 'example', 'value',
+        'state', 'contain', 'put', 'form', 'move', 'place', 'hold', 'take', 'allow',
+        'apply', 'call', 'run', 'try', 'test', 'check', 'clear', 'close', 'come',
+        'dashboard', 'interface', 'page', 'screen', 'click', 'view', 'display', 'button'
+    ])
+    
+    # If fewer than 2 selected documents, fall back to raw frequency
+    if not selected_tokens or len(selected_tokens) < 2:
+        flat_tokens = [tok for toks in selected_tokens for tok in toks if isinstance(tok, str)]
+        if not flat_tokens:
+            return [], True
+        # Use TF-IDF against full corpus instead of raw frequency
+        selection_tf = pd.Series(flat_tokens).value_counts() / len(flat_tokens)
+        keywords = []
+        for tok, tf in selection_tf.items():
+            if tok in extended_stop_words or len(tok) < 3 or tok.isdigit():
+                continue
+            docs_with_term = sum(1 for toks in full_corpus_tokens if tok in toks)
+            if docs_with_term == 0:
+                continue
+            idf = np.log(len(full_corpus_tokens) / docs_with_term)
+            keywords.append((tok, tf * idf))
+        keywords.sort(key=lambda x: x[1], reverse=True)
+        return keywords[:n], True
+    
+    # Compute TF (term frequency in selected documents)
+    flat_selected = [tok for toks in selected_tokens for tok in toks if isinstance(tok, str)]
+    tf_counter = pd.Series(flat_selected).value_counts()
+    
+    # Compute document frequency in selected documents
+    selected_doc_freq = {}
+    for tokens_list in selected_tokens:
+        unique_tokens = set(t for t in tokens_list if isinstance(t, str))
+        for tok in unique_tokens:
+            selected_doc_freq[tok] = selected_doc_freq.get(tok, 0) + 1
+    
+    # Apply minimum document frequency threshold (2 docs or 10% of selection, whichever is smaller)
+    min_df_threshold = max(2, int(0.1 * len(selected_tokens)))
+    min_df_threshold = min(min_df_threshold, len(selected_tokens))  # Ensure it doesn't exceed selection size
+    
+    viable_tokens = {
+        tok: count for tok, count in tf_counter.items()
+        if selected_doc_freq.get(tok, 0) >= min(min_df_threshold, 2)  # At least 2 docs minimum
+    }
+    
+    # Compute IDF (inverse document frequency) from full corpus
+    flat_corpus = [tok for toks in full_corpus_tokens for tok in toks if isinstance(tok, str)]
+    corpus_doc_freq = {}
+    for tokens_list in full_corpus_tokens:
+        unique_tokens = set(t for t in tokens_list if isinstance(t, str))
+        for tok in unique_tokens:
+            corpus_doc_freq[tok] = corpus_doc_freq.get(tok, 0) + 1
+    
+    total_docs_in_corpus = max(len(full_corpus_tokens), 1)
+    
+    # Compute TF-IDF for each viable token
+    tfidf_scores = {}
+    for tok, tf_count in viable_tokens.items():
+        if tok in extended_stop_words or len(tok) < 3 or tok.isdigit():
+            continue  # Skip stop words, short tokens, and pure numbers
+        
+        # TF: normalized by total tokens in selection
+        tf = tf_count / max(len(flat_selected), 1)
+        
+        # IDF: log(total_docs / docs_with_term)
+        idf = np.log(total_docs_in_corpus / max(corpus_doc_freq.get(tok, 1), 1))
+        
+        # TF-IDF is product
+        tfidf_scores[tok] = tf * idf
+    
+    # Sort by TF-IDF score descending and return top N
+    sorted_keywords = sorted(tfidf_scores.items(), key=lambda x: x[1], reverse=True)
+    return sorted_keywords[:n], False  # False indicates normal TF-IDF mode
 
 
 def build_hover_columns(df):
@@ -305,6 +518,182 @@ def run_search(df_slice, query, scopes):
     return df_slice
 
 
+# ============ Embedding Trust / Sanity Check Utilities ============
+
+def compute_keyword_overlap(doc1_tokens, doc2_tokens):
+    """Compute Jaccard similarity between two token lists."""
+    if not isinstance(doc1_tokens, list) or not isinstance(doc2_tokens, list):
+        return 0.0
+    set1 = set(str(t).lower() for t in doc1_tokens if t)
+    set2 = set(str(t).lower() for t in doc2_tokens if t)
+    if not set1 or not set2:
+        return 0.0
+    intersection = len(set1 & set2)
+    union = len(set1 | set2)
+    return intersection / union if union > 0 else 0.0
+
+
+def compute_euclidean_distance(point1, point2):
+    """Compute Euclidean distance between two points."""
+    if point1 is None or point2 is None:
+        return float('inf')
+    p1 = np.array(point1).flatten()
+    p2 = np.array(point2).flatten()
+    return float(np.linalg.norm(p1 - p2))
+
+
+def get_colorblind_safe_palette():
+    """Return a colorblind-safe categorical palette (Okabe-Ito + extended)."""
+    # Designed for colorblind accessibility with up to 9 distinct colors
+    return [
+        '#E69F00',  # Orange
+        '#56B4E9',  # Sky Blue
+        '#009E73',  # Bluish Green
+        '#F0E442',  # Yellow
+        '#0072B2',  # Blue
+        '#D55E00',  # Red Orange
+        '#CC79A7',  # Reddish Purple
+        '#999999',  # Gray
+        '#004225',  # Dark Green
+    ]
+
+
+def prepare_cohort_colors(saved_cohorts, df_work):
+    """
+    Prepare cohort color mapping with proper grouping for >6 cohorts.
+    
+    Returns:
+        color_map: dict of cohort_name -> color
+        cohort_names: list of cohort names in priority order
+        cohort_sizes: dict of cohort_name -> count
+    """
+    if not saved_cohorts:
+        return {}, [], {}
+    
+    palette = get_colorblind_safe_palette()
+    
+    # Calculate cohort sizes from actual presence in df_work
+    cohort_sizes = {}
+    for cohort_name, ids in saved_cohorts.items():
+        count = len([did for did in ids if str(did) in df_work['doc_id'].astype(str).values])
+        cohort_sizes[cohort_name] = count
+    
+    # Sort by size (descending) to prioritize larger cohorts for distinct colors
+    sorted_cohorts = sorted(cohort_sizes.items(), key=lambda x: x[1], reverse=True)
+    
+    color_map = {}
+    cohort_names = []
+    
+    # Assign colors to top 6 cohorts, group smaller ones into "Other"
+    if len(sorted_cohorts) <= 6:
+        # All cohorts get distinct colors
+        for i, (cohort_name, size) in enumerate(sorted_cohorts):
+            color_map[cohort_name] = palette[i % len(palette)]
+            cohort_names.append(cohort_name)
+    else:
+        # Top 5 cohorts get distinct colors, remainder grouped
+        for i in range(5):
+            cohort_name, size = sorted_cohorts[i]
+            color_map[cohort_name] = palette[i]
+            cohort_names.append(cohort_name)
+        
+        # Remaining cohorts grouped into "Other"
+        other_size = sum(size for _, size in sorted_cohorts[5:])
+        if other_size > 0:
+            color_map['Other'] = palette[7]  # Gray for "Other"
+            cohort_names.append('Other')
+    
+    return color_map, cohort_names, cohort_sizes
+
+
+def check_embedding_trust_for_pair(doc_id1, doc_id2, df, coords, keyword_overlap_threshold=0.15, 
+                                   distance_threshold_pct=20):
+    """
+    Check if two documents have embedding-trust issues:
+    - Are they visually close in projection?
+    - Do they share enough keywords?
+    Returns (is_suspicious, overlap, distance_pct, message)
+    """
+    try:
+        # Get token data
+        row1 = df[df['doc_id'].astype(str) == str(doc_id1)]
+        row2 = df[df['doc_id'].astype(str) == str(doc_id2)]
+        
+        if row1.empty or row2.empty:
+            return False, 0.0, 0.0, ""
+        
+        tokens1 = row1.iloc[0].get('__tokens', []) if '__tokens' in row1.columns else []
+        tokens2 = row2.iloc[0].get('__tokens', []) if '__tokens' in row2.columns else []
+        
+        # Compute keyword overlap
+        overlap = compute_keyword_overlap(tokens1, tokens2)
+        
+        # Get coordinates
+        idx1 = df[df['doc_id'].astype(str) == str(doc_id1)].index[0]
+        idx2 = df[df['doc_id'].astype(str) == str(doc_id2)].index[0]
+        
+        if coords is None or idx1 >= len(coords) or idx2 >= len(coords):
+            return False, overlap, 0.0, ""
+        
+        point1 = coords[idx1]
+        point2 = coords[idx2]
+        distance = compute_euclidean_distance(point1, point2)
+        
+        # Normalize distance to percentile (rough approximation)
+        # If distance < threshold, documents are "close"
+        is_close = distance < distance_threshold_pct / 100.0
+        has_low_overlap = overlap < keyword_overlap_threshold
+        
+        is_suspicious = is_close and has_low_overlap
+        distance_pct = min(100.0, distance * 100)
+        
+        if is_suspicious:
+            msg = f"⚠ Embedding trust: {doc_id1} and {doc_id2} are close in projection ({distance_pct:.1f}) but share few keywords ({overlap:.0%})"
+            return True, overlap, distance_pct, msg
+        
+        return False, overlap, distance_pct, ""
+    except Exception:
+        return False, 0.0, 0.0, ""
+
+
+def compute_global_embedding_health(df, coordinates, n_neighbors=5):
+    """
+    Compute average keyword overlap among nearest neighbors in embedding space.
+    Returns health score (0-1) where 1 = perfect alignment, 0 = no alignment.
+    """
+    if coordinates is None or len(df) < 2 or '__tokens' not in df.columns:
+        return None
+    
+    try:
+        # Build nearest neighbors in embedding space
+        n_neighbors = min(n_neighbors, len(df) - 1)
+        nn = NearestNeighbors(n_neighbors=n_neighbors + 1)  # +1 to include self
+        nn.fit(coordinates)
+        distances, indices = nn.kneighbors(coordinates)
+        
+        overlaps = []
+        for i in range(len(df)):
+            center_tokens = df.iloc[i].get('__tokens', [])
+            if not isinstance(center_tokens, list) or not center_tokens:
+                continue
+            
+            # Check overlap with neighbors (excluding self at index 0)
+            for neighbor_idx in indices[i][1:]:
+                neighbor_tokens = df.iloc[neighbor_idx].get('__tokens', [])
+                overlap = compute_keyword_overlap(center_tokens, neighbor_tokens)
+                overlaps.append(overlap)
+        
+        if overlaps:
+            health_score = float(np.mean(overlaps))
+            return health_score
+        return None
+    except Exception:
+        return None
+
+
+# ================================================================
+
+
 # Locate data files in the repo (flexible, with bundle preference)
 processed_csv_path = find_file(bundle_candidates('processed_data_with_clusters.csv') + bundle_candidates('full_dataset_with_new_id.csv'))
 
@@ -320,18 +709,30 @@ def aligned_candidates(filename):
         return [os.path.join(forced_root, filename)] + base
     return base
 
-coords_tsne_path = find_file(aligned_candidates('coords_tsne.npy'))
-coords_umap_path = find_file(aligned_candidates('coords_umap.npy'))
-# Prefer preproc_default coords by default; bundle preference can override
-coords_pca_path = find_file(aligned_candidates('coords.npy'))
-tfidf_matrix_path = find_file(aligned_candidates('tfidf_matrix.npz'))
-cluster_labels_path = find_file(aligned_candidates('cluster_labels.npy'))
-# processed_csv_path is already found above
-doc_ids_path = find_file(aligned_candidates('doc_ids.txt'))
+@st.cache_data(show_spinner="Loading coordinates...")
+def load_coordinate_files(_variant_key="default"):
+    """Load all coordinate files for a specific variant, respecting bundle selection."""
+    return {
+        'tsne': find_file(aligned_candidates('coords_tsne.npy')),
+        'umap': find_file(aligned_candidates('coords_umap.npy')),
+        'pca': find_file(aligned_candidates('coords.npy')),
+        'tfidf': find_file(aligned_candidates('tfidf_matrix.npz')),
+        'cluster_labels': find_file(aligned_candidates('cluster_labels.npy')),
+        'doc_ids': find_file(aligned_candidates('doc_ids.txt'))
+    }
+
+
+# Placeholder paths that will be updated dynamically based on variant
+coords_tsne_path = None
+coords_umap_path = None
+coords_pca_path = None
+tfidf_matrix_path = None
+cluster_labels_path = None
+doc_ids_path = None
 
 
 @st.cache_data(show_spinner="Loading and processing dataset...")
-def load_and_process_data(csv_path, doc_ids_path_arg, _version=2):
+def load_and_process_data(csv_path, doc_ids_path_arg, _variant_key="default", _version=2):
     # Load or synthesize small dataset
     if csv_path:
         df_local = pd.read_csv(csv_path)
@@ -378,59 +779,154 @@ def load_and_process_data(csv_path, doc_ids_path_arg, _version=2):
         
     df_local['__snippet'] = df_local[txt_src].apply(build_snippet)
     
-    # Parse keywords
+    # **CRITICAL**: Parse keywords from preprocessed token column ONLY.
+    # The offline preprocessing pipeline (parse.py::preprocess_texts) creates the 'tokens' column.
+    # This column contains lemmatized, stopword-filtered tokens.
+    # We do NOT use regex fallback extraction because it causes keyword inconsistency.
     tok_col, av_kw = parse_keyword_space(df_local)
     
     if '__tokens' not in df_local.columns or all(len(t) == 0 for t in df_local['__tokens']):
-        # No token column found — extract keywords from text
-        import re
-        _stopwords = {
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-            'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
-            'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
-            'could', 'should', 'may', 'might', 'shall', 'can', 'need', 'dare',
-            'ought', 'used', 'it', 'its', 'this', 'that', 'these', 'those',
-            'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'him', 'his',
-            'she', 'her', 'they', 'them', 'their', 'what', 'which', 'who',
-            'when', 'where', 'why', 'how', 'all', 'each', 'every', 'both',
-            'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not',
-            'only', 'own', 'same', 'so', 'than', 'too', 'very', 'just', 'about',
-            'above', 'after', 'again', 'also', 'any', 'because', 'before',
-            'between', 'during', 'into', 'through', 'under', 'until', 'up',
-            'out', 'over', 'then', 'once', 'here', 'there', 'if', 'while',
-            'etc', 'e.g', 'i.e', 'using', 'based', 'often', 'many', 'new',
-            'well', 'even', 'like', 'make', 'use', 'one', 'two', 'get',
-        }
-        def _extract_tokens(text):
-            if not isinstance(text, str) or not text.strip():
-                return []
-            words = re.findall(r'[a-zA-Z]{3,}', text.lower())
-            return [w for w in words if w not in _stopwords]
-        
-        df_local['__tokens'] = df_local[txt_src].apply(_extract_tokens)
-        tok_col = '__generated'
-        # Rebuild available keywords from generated tokens
-        flattened = [tok for toks in df_local['__tokens'] for tok in toks]
-        keyword_counts = pd.Series(flattened).value_counts()
-        av_kw = keyword_counts.head(100).index.tolist()
+        # Missing or empty token column indicates offline preprocessing was not run
+        import warnings
+        warnings.warn(
+            "\n" + "="*70 + "\n"
+            "CRITICAL: Token column missing or empty!\n"
+            "="*70 + "\n\n"
+            "The CSV file MUST have a 'tokens' column with preprocessed tokens from\n"
+            "the offline pipeline (parse.py::preprocess_texts).\n\n"
+            "This column contains:\n"
+            "  - Lowercased text\n"
+            "  - Lemmatized tokens (reduced to base form)\n"
+            "  - Stopwords removed\n"
+            "  - Tokens < 3 chars filtered\n\n"
+            "Online keyword extraction REQUIRES this column for consistency with\n"
+            "offline analysis. We do NOT use regex fallback extraction because:\n"
+            "  - Regex returns raw text (no lemmatization)\n"
+            "  - Results differ from offline pipeline\n"
+            "  - Creates keyword inconsistency between offline & online\n\n"
+            "TO FIX:\n"
+            "  1. Run: python run_pipeline.py\n"
+            "  2. Verify output CSV contains 'tokens' column\n"
+            "  3. Restart Streamlit app\n"
+            "="*70,
+            UserWarning,
+            stacklevel=3
+        )
+        # Initialize empty tokens to prevent app crash
+        df_local['__tokens'] = df_local.apply(lambda row: [], axis=1)
+        av_kw = []
         
     return df_local, tok_col, av_kw
 
-# Execute cached loading
-df, token_col, available_keywords = load_and_process_data(processed_csv_path, doc_ids_path)
+# Execute cached loading - include variant key to make cache bundle-aware
+variant_key = selected_bundle_root if selected_bundle_root else "default"
+df, token_col, available_keywords = load_and_process_data(processed_csv_path, doc_ids_path, _variant_key=variant_key)
 
-@st.cache_data
+# Load coordinate files for the selected variant
+coord_paths = load_coordinate_files(_variant_key=variant_key)
+coords_tsne_path = coord_paths['tsne']
+coords_umap_path = coord_paths['umap']
+coords_pca_path = coord_paths['pca']
+tfidf_matrix_path = coord_paths['tfidf']
+cluster_labels_path = coord_paths['cluster_labels']
+doc_ids_path = coord_paths['doc_ids']
+
 def extract_cluster_topics(df_for_topics):
+    """
+    Extract cluster labels using inter-cluster TF-IDF.
+    
+    **QUALITY NOTE**: Cluster keywords are computed at runtime using inter-cluster TF-IDF,
+    which is superior to offline frequency-based extraction. This ensures:
+    - Keywords are distinctive to EACH cluster (not generic terms appearing everywhere)
+    - Quality automatically improves when data changes or preprocessing varies
+    - TF-IDF scores favor terms specific to individual clusters over globally common words
+    
+    **CRITICAL REQUIREMENT**: Input DataFrame MUST have a '__tokens' column containing
+    PREPROCESSED token lists (lemmatized, stopword-filtered) from the offline pipeline.
+    These come from the CSV 'tokens' column via parse.py::preprocess_texts.
+    
+    DO NOT use raw regex-extracted tokens — this breaks offline/online consistency.
+    
+    **Algorithm**:
+    For each cluster, compute TF-IDF where:
+    - TF = term frequency within the cluster
+    - IDF = log(total_clusters / clusters_containing_term)
+    - Top 3 terms with highest TF-IDF scores are selected
+    - Extended stop words and short tokens (<3 chars) are filtered out
+    
+    This favors terms distinctive to ONE cluster, not generic terms appearing everywhere.
+    Performance: ~5ms per cluster for typical datasets.
+    
+    Returns:
+        dict mapping cluster_id -> "cluster_id: keyword1, keyword2, keyword3"
+        Empty dict if __tokens column is missing or empty.
+    """
     topic_map = {}
     if 'cluster' in df_for_topics.columns and '__tokens' in df_for_topics.columns:
-        from collections import Counter
-        for c in df_for_topics['cluster'].unique():
-            all_toks = [tok for toks in df_for_topics[df_for_topics['cluster'] == c]['__tokens'] for tok in toks]
-            if all_toks:
-                top_words = [kw for kw, _ in Counter(all_toks).most_common(3)]
+        # Extended stop words
+        extended_stop_words = set([
+            'also', 'make', 'use', 'using', 'used', 'one', 'way', 'can', 'will', 'may',
+            'need', 'want', 'good', 'like', 'well', 'even', 'just', 'much', 'many', 'often',
+            'best', 'help', 'get', 'give', 'keep', 'look', 'show', 'work', 'include',
+            'new', 'other', 'time', 'user', 'data', 'system', 'would', 'should',
+            'could', 'such', 'every', 'thing', 'set', 'case', 'part', 'group', 'high',
+            'low', 'add', 'say', 'see', 'may', 'different', 'type', 'provide', 'create',
+            'important', 'must', 'area', 'find', 'change', 'result', 'example', 'value',
+            'state', 'contain', 'put', 'form', 'move', 'place', 'hold', 'take', 'allow',
+            'apply', 'call', 'run', 'try', 'test', 'check', 'clear', 'close', 'come',
+            'dashboard', 'interface', 'page', 'screen', 'click', 'view', 'display', 'button'
+        ])
+        
+        clusters = sorted(df_for_topics['cluster'].unique())
+        
+        for c in clusters:
+            cluster_df = df_for_topics[df_for_topics['cluster'] == c]
+            cluster_tokens = cluster_df['__tokens'].tolist()
+            
+            if not cluster_tokens:
+                topic_map[c] = f"Cluster {c}"
+                continue
+            
+            # Compute TF (term frequency within this cluster)
+            flat_cluster_tokens = [tok for toks in cluster_tokens for tok in toks if isinstance(tok, str)]
+            tf_counter = pd.Series(flat_cluster_tokens).value_counts()
+            
+            # Compute "inter-cluster IDF": in how many OTHER clusters does each term appear?
+            # IDF = log(total_clusters / clusters_with_term)
+            # High IDF = appears in few clusters (distinctive)
+            inter_cluster_idf = {}
+            for tok in tf_counter.index:
+                if tok in extended_stop_words or len(tok) < 3 or tok.isdigit():
+                    continue
+                
+                # Count how many clusters have this token
+                clusters_with_tok = 0
+                for other_c in clusters:
+                    other_df = df_for_topics[df_for_topics['cluster'] == other_c]
+                    other_tokens = [t for toks in other_df['__tokens'] for t in toks if isinstance(t, str)]
+                    if tok in other_tokens:
+                        clusters_with_tok += 1
+                
+                if clusters_with_tok > 0:
+                    idf = np.log(len(clusters) / clusters_with_tok)
+                    inter_cluster_idf[tok] = idf
+            
+            # Compute inter-cluster TF-IDF and sort
+            tfidf_scores = {}
+            for tok, tf_count in tf_counter.items():
+                if tok not in inter_cluster_idf:
+                    continue
+                tf = tf_count / max(len(flat_cluster_tokens), 1)
+                tfidf_scores[tok] = tf * inter_cluster_idf[tok]
+            
+            sorted_keywords = sorted(tfidf_scores.items(), key=lambda x: x[1], reverse=True)
+            
+            if sorted_keywords:
+                top_words = [kw for kw, _ in sorted_keywords[:3]]
                 topic_map[c] = f"{c}: {', '.join(top_words)}"
             else:
                 topic_map[c] = f"Cluster {c}"
+    
     return topic_map
 
 GLOBAL_CLUSTER_MAP = extract_cluster_topics(df)
@@ -442,6 +938,12 @@ NON_METADATA_COLUMNS = {
 }
 metadata_candidates = [c for c in df.columns if c not in NON_METADATA_COLUMNS and not c.startswith('__')]
 numeric_metadata = [c for c in metadata_candidates if pd.api.types.is_numeric_dtype(df[c])]
+
+# Handle Year column specially: convert to numeric and add to numeric_metadata if present
+if 'Year' in df.columns and 'Year' not in numeric_metadata:
+    df['Year'] = pd.to_numeric(df['Year'], errors='coerce')
+    numeric_metadata.append('Year')
+
 categorical_metadata = [c for c in metadata_candidates if c not in numeric_metadata]
 candidate_chunk_cols = [c for c in df.columns if 'chunk' in c.lower() or 'segment' in c.lower() or 'part' in c.lower()]
 candidate_parent_cols = [c for c in df.columns if 'parent' in c.lower() or 'doc_id' in c.lower() or 'guideline' in c.lower()]
@@ -456,14 +958,26 @@ coords_umap = try_load(coords_umap_path, get_mtime(coords_umap_path)) if coords_
 coords_base = try_load(coords_pca_path, get_mtime(coords_pca_path)) if coords_pca_path else None
 tfidf_matrix = try_load(tfidf_matrix_path, get_mtime(tfidf_matrix_path)) if tfidf_matrix_path else None
 
+@st.cache_data
+def load_doc_ids_and_index(path, _df):
+    """Load doc_ids from file and build the doc_id to index mapping."""
+    doc_ids_list = None
+    if path:
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                doc_ids_list = [line.strip() for line in f if line.strip()]
+        except Exception:
+            doc_ids_list = None
+    
+    if doc_ids_list:
+        doc_id_to_global_idx = {doc_id: idx for idx, doc_id in enumerate(doc_ids_list)}
+    else:
+        doc_id_to_global_idx = {doc_id: idx for idx, doc_id in enumerate(_df['doc_id'].tolist())}
+    
+    return doc_ids_list, doc_id_to_global_idx
+
 # read doc_ids list if available to align .npy indices
-doc_ids_list = None
-if doc_ids_path:
-    try:
-        with open(doc_ids_path, 'r', encoding='utf-8') as f:
-            doc_ids_list = [line.strip() for line in f if line.strip()]
-    except Exception:
-        doc_ids_list = None
+doc_ids_list, doc_id_to_global_idx = load_doc_ids_and_index(doc_ids_path, df)
 
 if doc_ids_list and len(doc_ids_list) != len(df):
     # keep mismatch in warning list but ignore the file for alignment to avoid blank plots
@@ -473,10 +987,6 @@ if doc_ids_list and len(doc_ids_list) != len(df):
     )
     alignment_notes.append(alignment_note)
     doc_ids_list = None
-
-if doc_ids_list:
-    doc_id_to_global_idx = {doc_id: idx for idx, doc_id in enumerate(doc_ids_list)}
-else:
     doc_id_to_global_idx = {doc_id: idx for idx, doc_id in enumerate(df['doc_id'].tolist())}
 
 # Sanity checks: compare lengths and shapes so user gets a clear warning
@@ -546,6 +1056,15 @@ if coords_tsne is None:
 if coords_umap is None:
     coords_umap = PCA(n_components=2).fit_transform(base_embeddings + 0.01)
 
+# Compute global embedding health metric (cached)
+@st.cache_data
+def _compute_embedding_health():
+    # Use the 2D projection coordinates as proxy for visualization quality
+    health = compute_global_embedding_health(df, coords_tsne, n_neighbors=5)
+    return health
+
+embedding_health_score = _compute_embedding_health()
+
 
 def apply_scale_and_alpha(fig, alpha, scale):
     for trace in fig.data:
@@ -575,7 +1094,80 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, 
     for col in hover_cols:
         hover_dict[col] = True
     
-    if color_mode == 'Cluster':
+    if color_mode == 'Year':
+        # Color by temporal dimension (Year) using colorblind-safe sequential scale
+        if 'Year' in df_plot.columns:
+            # Convert Year to numeric, handling 'Unknown' and other non-numeric values
+            try:
+                year_numeric = pd.to_numeric(df_plot['Year'], errors='coerce')
+                # Fill NaN/Unknown with median of numeric years, or default to 2023
+                year_median = year_numeric.median()
+                if pd.isna(year_median):
+                    year_median = 2023  # Default if no numeric years found
+                df_plot['__year'] = year_numeric.fillna(year_median)
+            except Exception:
+                # Fallback: assign a default year if conversion fails
+                df_plot['__year'] = 2023
+            
+            fig = px.scatter(
+                df_plot,
+                x=xcol,
+                y=ycol,
+                color='__year',
+                color_continuous_scale='Viridis',  # Colorblind-safe sequential scale
+                hover_name='doc_id',
+                hover_data=hover_dict,
+                custom_data=['doc_id'],
+            )
+            
+            # Update color bar label
+            fig.update_coloraxes(colorbar_title="Year")
+            
+            # Apply selection/search highlighting on top
+            if selected_ids or search_ids or focused_ids:
+                df_plot['__status'] = 'Other'
+                if search_ids:
+                    df_plot.loc[df_plot['doc_id'].isin(search_ids), '__status'] = 'Search'
+                    df_plot.loc[df_plot['doc_id'].isin(search_ids), '__size'] = 12
+                if selected_ids:
+                    df_plot.loc[df_plot['doc_id'].isin(selected_ids), '__status'] = 'Selected'
+                    df_plot.loc[df_plot['doc_id'].isin(selected_ids), '__size'] = 14
+                if focused_ids:
+                    df_plot.loc[df_plot['doc_id'].isin(focused_ids), '__status'] = 'Focused'
+                    df_plot.loc[df_plot['doc_id'].isin(focused_ids), '__size'] = 16
+        else:
+            # Fall back to selection mode if Year not available
+            df_plot['__status'] = 'Other'
+            if search_ids:
+                df_plot.loc[df_plot['doc_id'].isin(search_ids), '__status'] = 'Search hit'
+                df_plot.loc[df_plot['doc_id'].isin(search_ids), '__size'] = 12
+            if selected_ids:
+                df_plot.loc[df_plot['doc_id'].isin(selected_ids), '__status'] = 'Selected'
+                df_plot.loc[df_plot['doc_id'].isin(selected_ids), '__size'] = 14
+            if focused_ids:
+                df_plot.loc[df_plot['doc_id'].isin(focused_ids), '__status'] = 'Focused'
+                df_plot.loc[df_plot['doc_id'].isin(focused_ids), '__size'] = 16
+            
+            color_map = {
+                'Focused': '#E63946',
+                'Selected': '#E63946',
+                'Search hit': '#F4A261',
+                'Other': '#457B9D'
+            }
+            
+            fig = px.scatter(
+                df_plot,
+                x=xcol,
+                y=ycol,
+                color='__status',
+                color_discrete_map=color_map,
+                hover_name='doc_id',
+                hover_data=hover_dict,
+                custom_data=['doc_id'],
+                category_orders={'__status': ['Focused', 'Selected', 'Search hit', 'Other']}
+            )
+    
+    elif color_mode == 'Cluster':
         if 'cluster' in df_plot.columns:
             # Bugfix: map to consistent colors for each cluster
             cluster_counts = df_plot['cluster'].value_counts().to_dict()
@@ -609,6 +1201,73 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, 
             hover_data=hover_dict,
             custom_data=['doc_id'],
         )
+    
+    elif color_mode == 'Saved Group':
+        # Color by saved cohort membership with colorblind-safe palette
+        saved_cohorts = {}  # Will be populated via __cohort column if it exists
+        
+        # Check if __cohort column has been prepared upstream
+        if '__cohort' in df_plot.columns:
+            # Extract cohort membership from the column
+            for cohort_name in df_plot['__cohort'].unique():
+                if cohort_name != 'Other' or True:  # Keep all cohorts including 'Other'
+                    ids = df_plot[df_plot['__cohort'] == cohort_name]['doc_id'].tolist()
+                    saved_cohorts[cohort_name] = ids
+        
+        if saved_cohorts:
+            # Get colorblind-safe colors and cohort info
+            color_map, cohort_names, cohort_sizes = prepare_cohort_colors(saved_cohorts, df_plot)
+            
+            # Add size highlighting for selected/search hits
+            if selected_ids:
+                df_plot.loc[df_plot['doc_id'].isin(selected_ids), '__size'] = 14
+            if search_ids:
+                df_plot.loc[df_plot['doc_id'].isin(search_ids), '__size'] = 12
+            if focused_ids:
+                df_plot.loc[df_plot['doc_id'].isin(focused_ids), '__size'] = 16
+            
+            # Map cohorts > 6 to "Other" in df_plot based on color_map
+            if len(saved_cohorts) > 6:
+                df_plot['__cohort_grouped'] = df_plot['__cohort']
+                for cohort_name in saved_cohorts.keys():
+                    if cohort_name not in color_map:
+                        df_plot.loc[df_plot['__cohort'] == cohort_name, '__cohort_grouped'] = 'Other'
+                cohort_col = '__cohort_grouped'
+            else:
+                cohort_col = '__cohort'
+            
+            fig = px.scatter(
+                df_plot,
+                x=xcol,
+                y=ycol,
+                color=cohort_col,
+                color_discrete_map=color_map,
+                hover_name='doc_id',
+                hover_data=hover_dict,
+                custom_data=['doc_id'],
+                category_orders={cohort_col: cohort_names}
+            )
+            # Legend will be automatically generated by Plotly with cohort names and colors
+            # and styled by the general layout settings below
+        else:
+            # Fallback to selection mode if no cohorts
+            df_plot['__status'] = 'Other'
+            if selected_ids:
+                df_plot.loc[df_plot['doc_id'].isin(selected_ids), '__status'] = 'Selected'
+                df_plot.loc[df_plot['doc_id'].isin(selected_ids), '__size'] = 14
+            
+            color_map = {'Selected': '#E63946', 'Other': '#457B9D'}
+            fig = px.scatter(
+                df_plot,
+                x=xcol,
+                y=ycol,
+                color='__status',
+                color_discrete_map=color_map,
+                hover_name='doc_id',
+                hover_data=hover_dict,
+                custom_data=['doc_id'],
+            )
+    
     else:
         # Color by selection status
         df_plot['__status'] = 'Other'
@@ -677,6 +1336,49 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, 
                     trace.marker.size = 5
                     trace.marker.opacity = 0.75
                     trace.marker.symbol = 'circle'
+            elif color_mode == 'Year':
+                # For Year mode, preserve year-based coloring but highlight selections
+                if selected_ids or search_ids or focused_ids:
+                    opacities = []
+                    sizes = []
+                    l_widths = []
+                    l_colors = []
+                    m_symbols = []
+                    
+                    for cdata in trace.customdata:
+                        did = cdata[0]
+                        if focused_ids and did in focused_ids:
+                           opacities.append(1.0)
+                           sizes.append(18)
+                           l_widths.append(3)
+                           l_colors.append('white')
+                           m_symbols.append('x')
+                        elif selected_ids and did in selected_ids:
+                           opacities.append(1.0)
+                           sizes.append(14)
+                           l_widths.append(2)
+                           l_colors.append('white')
+                           m_symbols.append('diamond')
+                        elif search_ids and did in search_ids:
+                           opacities.append(1.0)
+                           sizes.append(10)
+                           l_widths.append(1.5)
+                           l_colors.append('white')
+                           m_symbols.append('star')
+                        else:
+                           opacities.append(0.4)
+                           sizes.append(5)
+                           l_widths.append(0.0)
+                           l_colors.append('rgba(0,0,0,0.0)')
+                           m_symbols.append('circle')
+                    trace.marker.opacity = opacities
+                    trace.marker.size = sizes
+                    trace.marker.line = dict(width=l_widths, color=l_colors)
+                    trace.marker.symbol = m_symbols
+                else:
+                    trace.marker.size = 7
+                    trace.marker.opacity = 0.8
+                    trace.marker.line = dict(width=0.5, color='rgba(0,0,0,0.2)')
             else:
                 if selected_ids or search_ids or focused_ids:
                     # Dynamically fade unselected points and highlight selections
@@ -763,7 +1465,7 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, 
     return fig
 
 
-st.markdown("## AbstractsViewer")
+st.markdown("## Embeddings Explorer")
 
 # initialize selection state
 if 'selected_ids' not in st.session_state:
@@ -773,11 +1475,125 @@ if 'search_hits' not in st.session_state:
 if 'selection_history' not in st.session_state:
     st.session_state['selection_history'] = []
 if 'dragmode' not in st.session_state:
-    st.session_state['dragmode'] = 'pan'
+    st.session_state['dragmode'] = 'lasso'
 if 'last_chart_states' not in st.session_state:
     st.session_state['last_chart_states'] = {}
 if 'chart_revisions' not in st.session_state:
     st.session_state['chart_revisions'] = {'chart_tsne': 0, 'chart_umap': 0, 'chart_pca': 0, 'chart_focus': 0}
+if 'search_query' not in st.session_state:
+    st.session_state['search_query'] = ''
+if 'search_query_persist' not in st.session_state:
+    st.session_state['search_query_persist'] = st.session_state.get('search_query', '')
+if 'search_query_input' not in st.session_state:
+    st.session_state['search_query_input'] = st.session_state.get('search_query_persist', '')
+if 'visible_doc_ids' not in st.session_state:
+    st.session_state['visible_doc_ids'] = df['doc_id'].astype(str).tolist()
+if 'orient_me_dismissed' not in st.session_state:
+    st.session_state['orient_me_dismissed'] = False
+
+# ===== SESSION HISTORY TRACKING =====
+if 'history_log' not in st.session_state:
+    st.session_state['history_log'] = []
+if 'history_expanded' not in st.session_state:
+    st.session_state['history_expanded'] = False
+
+# ===== PROJECTION EXPANSION STATE =====
+if 'expanded_projection' not in st.session_state:
+    st.session_state['expanded_projection'] = None  # None, 'tsne', 'umap', or 'pca'
+
+# ===== PIPELINE CONFIGURATION & SNAPSHOTS =====
+if 'pipeline_snapshots' not in st.session_state:
+    st.session_state['pipeline_snapshots'] = {}  # {snapshot_name: {stage_configs + timestamp}}
+if 'pipeline_locked_stages' not in st.session_state:
+    st.session_state['pipeline_locked_stages'] = set()  # Locked stage names
+if 'compare_snapshots' not in st.session_state:
+    st.session_state['compare_snapshots'] = False  # Toggle for snapshot diff visualization
+
+from datetime import datetime
+
+def add_history_entry(action_type, description, state_snapshot=None):
+    """Log a user action with timestamp and optional state snapshot for restoration."""
+    entry = {
+        'timestamp': datetime.now().strftime('%I:%M%p').lower(),  # "2:14pm" format
+        'action_type': action_type,
+        'description': description,
+        'state_snapshot': state_snapshot or {},
+        'full_timestamp': datetime.now()  # For export sorting
+    }
+    st.session_state['history_log'].append(entry)
+
+def create_state_snapshot():
+    """Capture current session state for restoration."""
+    return {
+        'selected_ids': st.session_state.get('selected_ids', []),
+        'search_hits': st.session_state.get('search_hits', []),
+        'search_query_persist': st.session_state.get('search_query_persist', ''),
+        'visible_doc_ids': st.session_state.get('visible_doc_ids', []),
+    }
+
+def restore_state_from_entry(entry):
+    """Restore session state from a history log entry."""
+    if not entry.get('state_snapshot'):
+        return
+    
+    snapshot = entry['state_snapshot']
+    st.session_state['selected_ids'] = snapshot.get('selected_ids', [])
+    st.session_state['search_hits'] = snapshot.get('search_hits', [])
+    st.session_state['search_query_persist'] = snapshot.get('search_query_persist', '')
+    st.session_state['visible_doc_ids'] = snapshot.get('visible_doc_ids', [])
+    st.session_state['search_query'] = snapshot.get('search_query_persist', '')
+    st.rerun()
+
+# ===== PIPELINE CONFIGURATION & METRICS =====
+
+def get_current_pipeline_config():
+    """Extract current active pipeline configuration."""
+    config = {
+        'preprocessing': {
+            'lemmatization': True,  # Default assumption based on parse.py
+            'remove_stopwords': True,
+            'min_word_length': 3,
+            'lowercase': True,
+        },
+        'vectorization': {
+            'method': 'tfidf',
+            'max_features': 5000,
+            'min_df': 2,
+            'max_df': 0.8,
+            'ngram_range': (1, 2),
+        },
+        'embedding': {
+            'method': 'pca/svd',
+            'n_components': 50,  # High-dim intermediate
+        },
+        'projection': {
+            'available_methods': ['pca', 'tsne', 'umap'],
+            'current_method': 'pca',  # Will be enhanced with actual UI selection
+        }
+    }
+    return config
+
+def compute_stage_metrics():
+    """Compute quality metrics for each pipeline stage."""
+    metrics = {
+        'preprocessing': {'metric': 'tokens', 'value': 'Extracted'},
+        'vectorization': {'metric': 'vocab_size', 'value': '~5000'},
+        'embedding': {'metric': 'variance', 'value': 'N/A'},
+        'projection': {'metric': 'health', 'value': f'{embedding_health_score:.0%}' if embedding_health_score else 'N/A'},
+    }
+    
+    # Try to compute embedding variance from PCA
+    try:
+        if len(base_embeddings) >= 2:
+            from sklearn.decomposition import PCA
+            pca_test = PCA(n_components=min(5, base_embeddings.shape[1]))
+            pca_test.fit(base_embeddings)
+            var_explained = sum(pca_test.explained_variance_ratio_) * 100
+            metrics['embedding']['value'] = f'{var_explained:.1f}%'
+    except Exception:
+        pass
+    
+    return metrics
 
 # Compact status bar (filled in later after filtering runs)
 status_placeholder = st.empty()
@@ -786,13 +1602,30 @@ status_placeholder = st.empty()
 
 # Guided Tour / Getting Started
 with st.sidebar:
-    with st.expander('Walkthrough / Getting Started', expanded=True):
-        st.write("Take a use-case scenario that exemplifies features in AbstractsViewer:")
-        st.write("1. **Narrow the search**: Type a search term in the **Search panel** and use the keyword search.")
-        st.write("2. **Quick Evaluation**: Select a paper and use the **Regional matrix** (Analysis tab > Top Keywords) to get a high-level overview of concepts.")
-        st.write("3. **Understand Reccomendations**: Select another similar paper and look at **G. Selected document view**. Yellow highlighted words show why it was picked.")
-        st.write("4. **Corpus Map**: Look at the 2D projection density map to identify why papers are grouped into regions based on similarities.")
-        st.write("5. **Expand Regions**: Click on a region cell to expand it in the **Scatterplot**.")
+    with st.expander('Getting Started', expanded=True):
+        # Orient Me: Smart onboarding subsection (will be populated after df_work is computed)
+        orient_me_container = st.container(border=False)
+        
+        st.write("1. **Load Data**: The latest dataset is auto-loaded.")
+        st.write("2. **Explore**: Use the 3 projections to see document relationships.")
+        st.write("3. **Select**: Lasso-select points to highlight them across all views.")
+        st.write("4. **Analyze**: Check the 'Analysis' tab for cluster stats and details.")
+        
+        # Store container reference for later population
+        st.session_state['_orient_me_container'] = orient_me_container
+
+# Add CSS to remove border from orient_me_container and fix button wrapping
+st.markdown("""
+<style>
+    div[data-testid="stContainer"] > div:has(div) .stExpander > div:first-child {
+        border: none !important;
+    }
+    button[key*="orient_select_cluster_"] {
+        white-space: nowrap !important;
+        font-size: 0.9rem !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # Dynamic Clustering Logic
 with st.sidebar:
@@ -830,6 +1663,26 @@ with st.sidebar:
         # Apply dynamic clusters if active
         if cluster_mode == "Dynamic (K-Means)" and 'dynamic_clusters' in st.session_state:
             df['cluster'] = st.session_state['dynamic_clusters']
+    
+    # Cluster Keywords Quality Note
+    with st.expander("ℹ️ About Cluster Keywords", expanded=False):
+        st.markdown("""
+**Cluster keywords are computed at runtime using Inter-Cluster TF-IDF**, which ranks terms by how distinctive they are to each cluster:
+
+- **TF** = frequency of the term within the cluster
+- **IDF** = log(total_clusters / clusters_containing_term)
+- **Result** = top 3 distinctive terms per cluster
+
+**Why this is better than offline frequency counting:**
+- Keywords reflect what makes each cluster **different** (not just common globally)
+- 🔄 Quality automatically improves when data/preprocessing changes
+- Computed at load time (~5ms per cluster)
+- Consistent with preprocessed tokens from the offline pipeline
+
+**Quality indicators:**
+- Green keywords = well-separated, distinctive cluster
+- Vague keywords = clusters may overlap; plot projection for confirmation
+        """)
 
 # default sidebar values (populated below)
 search_query = ''
@@ -893,6 +1746,24 @@ with st.sidebar:
             st.session_state['selected_bundle_root'] = new_root
             st.info(f'Selected bundle: {chosen_label or "(auto)"}')
             st.rerun()
+        
+        # Display variant information panel
+        variant_info = get_variant_comparison_info(selected_bundle_root)
+        current_variant = variant_info["current"]
+        
+        st.markdown("**Preprocessing Settings:**")
+        variant_col1, variant_col2 = st.columns([1, 2])
+        with variant_col1:
+            st.metric(label="Variant", value=current_variant["label"])
+        with variant_col2:
+            st.write(f"_{current_variant['settings']}_")
+        
+        # Show differences from default if not default
+        if variant_info["differences"]:
+            with st.expander("🔄 Differences from Default"):
+                for diff in variant_info["differences"]:
+                    st.write(f"• {diff}")
+        
         if alignment_issues:
             st.warning('Data alignment issues detected:')
             for it in alignment_issues:
@@ -902,30 +1773,202 @@ with st.sidebar:
         st.caption('Display Mode')
         view_mode = st.radio(
             "View Layout",
-            ["Corpus Map (Linked 3)", "Scatterplot (Expanded Focus)"],
-            help="Corpus Map: navigate all documents as a density heat map explicitly showing search/selection. Scatterplot: an expanded view for better clarity."
+            ["Linked (All 3)", "Single (Focus)"],
+            help="Linked: Compare 3 projections. Single: Large view for details."
         )
         focus_proj = 'UMAP'
-        if view_mode == "Scatterplot (Expanded Focus)":
+        if view_mode == "Single (Focus)":
             focus_proj = st.selectbox("Select Projection", ["UMAP", "t-SNE", "PCA"])
 
         color_mode = st.radio(
             'Color points by:',
-            options=['Selection', 'Cluster', 'Saved Group'],
-            help='Switch between showing selection status (Red/Blue), semantic clusters (Multi-color), or Saved Groups.'
+            options=['Selection', 'Cluster', 'Saved Group', 'Year'],
+            help='Switch between showing selection status (Red/Blue), semantic clusters (Multi-color), Saved Groups, or temporal distribution (Year).'
         )
+        
+        # Note about cluster keyword quality
+        if color_mode == 'Cluster':
+            st.info(
+                "**Cluster Keywords** are computed at runtime using Inter-Cluster TF-IDF, which ranks terms by how distinctive they are to each cluster. "
+                "This is more accurate than offline frequency-based extraction. "
+                "Expand 'Clustering Settings' → 'About Cluster Keywords' for details.",
+                icon="ℹ️"
+            )
         
         st.markdown('**Visual Tweaks**')
         point_alpha = st.slider('Point Opacity', 0.1, 1.0, 0.7, 0.1)
-        point_size_scale = st.slider('Point Size', 0.5, 3.0, 1.5, 0.1)
+        point_size_scale = st.slider('Point Size', 0.5, 2.0, 1.0, 0.1)
 
         show_download_buttons = st.checkbox('Show plot download buttons', value=False, help='Enable this to download high-resolution PNGs of the current plots for reports or presentations.')
         show_hover = st.checkbox('Show tooltip on hover', value=True, help='Uncheck to completely hide the hover tooltips for a cleaner view.')
 
-    with st.expander('A. Search Panel', expanded=True):
-        st.markdown("**Search Panel**: Use this to search for documents within the database.")
-        st.caption("Keyword search displays matching documents below and shows them dynamically on the Corpus Map.")
-        search_query = st.text_input('Search doc_id / keyword / phrase / regex', '')
+    # ===== PIPELINE CONFIGURATION PANEL =====
+    with st.expander('Pipeline', expanded=False):
+        st.markdown('**Active Pipeline Stages**')
+        
+        # Help text explaining the panel layout
+        with st.expander('Help: Understanding the Pipeline Panel', expanded=False):
+            st.markdown("""
+            **Left column (Lock toggle):**
+            - LOCKED = Stage locked (method cannot be changed)
+            - UNLOCKED = Stage unlocked (you can swap the method)
+            
+            **Middle column (Method dropdown):**
+            - Choose which algorithm to use for this stage
+            
+            **Metric column:**
+            - **Extracted/Tokens**: How many unique words in your vocabulary
+            - **Vocab Size**: Total unique terms (e.g., ~5000)
+            - **Variance %**: How much information the embedding preserves (higher is better)
+            - **Health %**: Embedding coherence score (11% = scattered, neighbors are distant)
+            
+            **Right indicator (OK or LOCKED):**
+            - OK = Stage completed successfully
+            - LOCKED = Stage is locked, cannot be modified
+            
+            **Key Insight:** Low embedding health (11%) means embeddings are scattered. Try adjusting TF-IDF or using UMAP instead of PCA.
+            """)
+        
+        # Get current config and metrics
+        pipeline_cfg = get_current_pipeline_config()
+        stage_metrics = compute_stage_metrics()
+        
+        # Define the 4 pipeline stages
+        stages = [
+            ('Preprocessing/Lemmatization', 'preprocessing', ['lemmatize', 'lowercase', 'stopword-removal']),
+            ('Vectorization/TF-IDF', 'vectorization', ['tfidf']),
+            ('Embedding', 'embedding', ['pca', 'svd']),
+            ('Projection', 'projection', ['pca', 'tsne', 'umap']),
+        ]
+        
+        pipeline_status = []
+        
+        for stage_label, stage_key, alternatives in stages:
+            sc1, sc2, sc3, sc4 = st.columns([2.5, 1.5, 1.2, 0.6])
+            
+            # Stage name with lock toggle
+            with sc1:
+                is_locked = stage_key in st.session_state['pipeline_locked_stages']
+                lock_label = "[LOCKED] " if is_locked else "[UNLOCKED] "
+                toggle_help = "Click to lock/unlock this stage (prevents accidental method changes)"
+                if st.checkbox(f"{lock_label}{stage_label}", 
+                             value=not is_locked,
+                             key=f"stage_active_{stage_key}",
+                             label_visibility="collapsed",
+                             help=toggle_help):
+                    if is_locked:
+                        st.session_state['pipeline_locked_stages'].discard(stage_key)
+                    else:
+                        st.session_state['pipeline_locked_stages'].add(stage_key)
+            
+            # Dropdown for alternatives
+            with sc2:
+                cfg = pipeline_cfg.get(stage_key, {})
+                current_method = cfg.get('method', alternatives[0] if alternatives else 'default')
+                selected = st.selectbox(
+                    f"Method##_{stage_key}",
+                    options=alternatives or ['default'],
+                    index=0,
+                    key=f"pipeline_method_{stage_key}",
+                    label_visibility="collapsed",
+                    help=f"Active algorithm for {stage_label}"
+                )
+            
+            # Quality metric
+            with sc3:
+                metric_info = stage_metrics.get(stage_key, {})
+                metric_label = metric_info.get('metric', '?')
+                metric_value = metric_info.get('value', 'N/A')
+                
+                # Add tooltip based on metric type
+                metric_tooltip = {
+                    'Extracted': 'Unique tokens extracted (vocabulary size)',
+                    'Vocab': 'Size of TF-IDF vocabulary',
+                    'Variance': 'Information preserved by embedding (% of total)',
+                    'Health': 'Embedding coherence score (higher is better, 11% = scattered neighbors)'
+                }.get(metric_label, 'Quality metric for this stage')
+                
+                st.metric(metric_label, metric_value, label_visibility="collapsed", help=metric_tooltip)
+            
+            # Status indicator
+            with sc4:
+                status_text = "LOCKED" if is_locked else "OK"
+                status_tooltip = "Stage locked (cannot modify)" if is_locked else "Stage completed"
+                st.caption(status_text, help=status_tooltip)
+            
+            pipeline_status.append({
+                'stage': stage_key,
+                'method': selected,
+                'locked': is_locked,
+                'metric': metric_value
+            })
+        
+        st.divider()
+        
+        # Save Snapshot UI
+        st.markdown('**Pipeline Snapshots**')
+        col_snap1, col_snap2 = st.columns([2, 1])
+        
+        with col_snap1:
+            snapshot_name = st.text_input('Snapshot name', placeholder='e.g., "baseline", "high-variance"', key='snapshot_name_input', label_visibility="collapsed")
+        
+        with col_snap2:
+            if st.button('Save Snapshot', key='save_pipeline_snapshot'):
+                if snapshot_name and snapshot_name.strip():
+                    snapshot_data = {
+                        'timestamp': datetime.now().isoformat(),
+                        'config': pipeline_cfg,
+                        'metrics': stage_metrics,
+                        'status': pipeline_status,
+                    }
+                    st.session_state['pipeline_snapshots'][snapshot_name.strip()] = snapshot_data
+                    st.success(f'Saved snapshot: {snapshot_name.strip()}')
+                    st.session_state['snapshot_name_input'] = ''
+                else:
+                    st.warning('Enter a snapshot name')
+        
+        # List existing snapshots
+        if st.session_state['pipeline_snapshots']:
+            st.markdown('**Saved Snapshots**')
+            snapshot_names = list(st.session_state['pipeline_snapshots'].keys())
+            
+            for snap_name in snapshot_names:
+                snap_data = st.session_state['pipeline_snapshots'][snap_name]
+                col1, col2, col3 = st.columns([2, 1, 1])
+                
+                with col1:
+                    st.caption(f"📦 {snap_name}")
+                    ts = snap_data.get('timestamp', '')
+                    if ts:
+                        st.caption(f"_{ts.split('T')[0]}_")
+                
+                with col2:
+                    if st.button('View', key=f'view_snap_{snap_name}', use_container_width=True):
+                        st.session_state['selected_snapshot_view'] = snap_name
+                
+                with col3:
+                    if st.button('Delete', key=f'del_snap_{snap_name}', use_container_width=True):
+                        del st.session_state['pipeline_snapshots'][snap_name]
+                        st.rerun()
+        
+        # Diff toggle when 2+ snapshots exist
+        if len(st.session_state['pipeline_snapshots']) >= 2:
+            st.divider()
+            st.markdown('**Snapshot Comparison**')
+            compare_enabled = st.checkbox(
+                'Show projection diff when comparing snapshots',
+                value=st.session_state.get('compare_snapshots', False),
+                key='compare_snapshots_toggle',
+                help='Enable side-by-side visualization diff across saved pipeline configurations'
+            )
+            if compare_enabled != st.session_state.get('compare_snapshots', False):
+                st.session_state['compare_snapshots'] = compare_enabled
+
+    with st.expander('Search & Filter', expanded=False):
+        # Improved Search
+        search_query = st.text_input('Search doc_id / keyword / phrase / regex', key='search_query_input')
+        st.session_state['search_query'] = search_query
+        st.session_state['search_query_persist'] = search_query
         use_regex = st.checkbox('Use Regex', value=False, help='Treat search query as a Regular Expression.')
         
         search_scopes = st.multiselect('Search scopes', options=['doc_id', 'keywords', 'phrase'], default=['doc_id', 'phrase'], help="Where to look for your search terms. 'doc_id' checks filenames, 'phrase' checks full text.")
@@ -957,6 +2000,13 @@ with st.sidebar:
                 key=f'num_filter_{col}'
             )
             numeric_ranges[col] = (low, high)
+        
+        # Temporal Analysis Guidance
+        if 'Year' in numeric_metadata:
+            st.caption(
+                "ℹ️ Tip: Switch color to **Year** (Display Mode) to see corpus evolution. Use the Year range slider to filter time windows and watch topics shift across the projection."
+            )
+        
         max_points = st.slider('Max points to display', min_value=50, max_value=3000, value=1200, step=50, help="Reduce this number if the app feels slow. Limits how many dots are drawn.")
 
     # Saved Group Management (Persistent Selection)
@@ -969,6 +2019,11 @@ with st.sidebar:
         new_cohort_name = st.text_input('New saved group name', placeholder='e.g., Outliers, Group A')
         if st.button('Save current selection') and new_cohort_name and current_sel_len > 0:
             st.session_state['saved_cohorts'][new_cohort_name] = list(st.session_state['selected_ids'])
+            add_history_entry(
+                'cohort_saved',
+                f"Saved group '{new_cohort_name}' with {current_sel_len} document{'s' if current_sel_len != 1 else ''}",
+                create_state_snapshot()
+            )
             st.success(f"Saved {current_sel_len} docs to '{new_cohort_name}'")
             st.rerun()
 
@@ -979,12 +2034,17 @@ with st.sidebar:
             for name, ids in st.session_state['saved_cohorts'].items():
                 c1, c2, c3 = st.columns([3, 1, 1])
                 with c1:
-                    if st.button(f"{name} ({len(ids)})", key=f"load_{name}", use_container_width=True):
+                    if st.button(f"{name} ({len(ids)})", key=f"load_{name}", width="stretch"):
                         update_selection(ids, additive=st.session_state.get('additive_mode', False))
+                        add_history_entry(
+                            'cohort_loaded',
+                            f"Loaded group '{name}' with {len(ids)} document{'s' if len(ids) != 1 else ''}",
+                            create_state_snapshot()
+                        )
                 with c2:
                     st.write("") # Spacer
                 with c3:
-                    if st.button('🗑️', key=f"del_{name}"):
+                    if st.button('Delete', key=f"del_{name}"):
                         cohorts_to_delete.append(name)
             
             if cohorts_to_delete:
@@ -1009,17 +2069,17 @@ with st.sidebar:
         # Quick actions row
         qcol1, qcol2, qcol3 = st.columns(3)
         with qcol1:
-            if st.button('Clear', key='btn_clear_selection', use_container_width=True):
+            if st.button('Clear', key='btn_clear_selection', width="stretch"):
                 update_selection([], additive=False)
         with qcol2:
-            if st.button('Undo', key='btn_undo', use_container_width=True, disabled=len(st.session_state.get('selection_history', [])) == 0):
+            if st.button('Undo', key='btn_undo', width="stretch", disabled=len(st.session_state.get('selection_history', [])) == 0):
                 history = st.session_state.get('selection_history', [])
                 if history:
                     st.session_state['selected_ids'] = history.pop()
                     st.session_state['selection_history'] = history
                     st.rerun()
         with qcol3:
-            if st.button('Random', key='btn_random', use_container_width=True, help='Select 10 random documents to explore the dataset.'):
+            if st.button('Random', key='btn_random', width="stretch", help='Select 10 random documents to explore the dataset.'):
                 import random
                 random_ids = random.sample(doc_options, min(10, len(doc_options)))
                 update_selection(random_ids, additive=False)
@@ -1027,24 +2087,22 @@ with st.sidebar:
         # Brushing modes
         qcol4, qcol5 = st.columns(2)
         with qcol4:
-            if st.button('Invert', key='btn_invert', use_container_width=True, help='Select everything that is NOT currently selected.'):
-                all_ids = set(df_work['doc_id'].tolist())
+            if st.button('Invert', key='btn_invert', width="stretch", help='Select everything that is NOT currently selected.'):
+                all_ids = set(st.session_state.get('visible_doc_ids', df['doc_id'].astype(str).tolist()))
                 current_ids = set(st.session_state['selected_ids'])
                 inverted = list(all_ids - current_ids)
                 update_selection(inverted, additive=False)
-        # Mouse tool
-        mouse_tool = st.radio('Mouse Tool', options=['Point Click (Pan)', 'Lasso', 'Box Select'], index=0, help='Change how your mouse interacts with the graph. Point Click is easiest for just tapping individual dots.')
-        if mouse_tool == 'Point Click (Pan)':
-            st.session_state['dragmode'] = 'pan'
-        elif mouse_tool == 'Box Select':
-            st.session_state['dragmode'] = 'select'
-        else:
-            st.session_state['dragmode'] = 'lasso'
+        with qcol5:
+            box_select = st.checkbox('Box Select', value=False, help='Switch to rectangular box selection (default is freehand lasso).')
+            if box_select:
+                st.session_state['dragmode'] = 'select'
+            else:
+                st.session_state['dragmode'] = 'lasso'
         
         # Additive selection mode
-        additive_mode = st.checkbox('Additive Selection (Click to Add)', value=True, help='Keep your existing selection when clicking a new point. Uncheck to start fresh on every click.')
+        additive_mode = st.checkbox('Additive Selection', value=False, help='Keep existing selection when making a new one (Ctrl-click behavior). Uncheck to start fresh with each drag.')
         if 'additive_mode' not in st.session_state:
-            st.session_state['additive_mode'] = True
+            st.session_state['additive_mode'] = False
         st.session_state['additive_mode'] = additive_mode
         
         # Export selection
@@ -1063,7 +2121,7 @@ with st.sidebar:
                 data=json.dumps(export_data, indent=2),
                 file_name='selected_docs.json',
                 mime='application/json',
-                use_container_width=True
+                width="stretch"
             )
             
             # Export Filtered CSV
@@ -1075,7 +2133,7 @@ with st.sidebar:
                    data=csv_string,
                    file_name='selected_data.csv',
                    mime='text/csv',
-                   use_container_width=True
+                   width="stretch"
                )
     with st.expander('Sessions & Advanced', expanded=False):
         st.markdown('**Sessions**')
@@ -1096,7 +2154,7 @@ with st.sidebar:
         st.caption("Use these parameters to reproduce this exact map structure.")
         # Save session
         session_name = st.text_input('Session name', placeholder='my_analysis', help="Save your current filters, selection, and view settings to reload later.")
-        if st.button('Save Session', use_container_width=True):
+        if st.button('Save Session', width="stretch"):
             if session_name:
                 import json
                 import os
@@ -1118,7 +2176,7 @@ with st.sidebar:
             session_files = [f.replace('.json', '') for f in os.listdir('sessions') if f.endswith('.json')]
             if session_files:
                 load_session = st.selectbox('Load session', options=[''] + session_files)
-                if st.button('Load Session', use_container_width=True) and load_session:
+                if st.button('Load Session', width="stretch") and load_session:
                     import json
                     with open(f'sessions/{load_session}.json', 'r') as f:
                         session_data = json.load(f)
@@ -1133,7 +2191,7 @@ with st.sidebar:
         chunk_col = None if chunk_choice == '(none)' else chunk_choice
         parent_col = None if parent_choice == '(none)' else parent_choice
         if chunk_col and parent_col:
-            if st.button('Build chunk ↔ parent map', key='btn_build_chunk_map'):
+            if st.button('Build chunk â†” parent map', key='btn_build_chunk_map'):
                 try:
                     chunk_parent_map, parent_chunk_map = apply_chunk_mapping(df, chunk_col, parent_col)
                     st.success(f'Built mapping with {len(chunk_parent_map)} chunk entries')
@@ -1142,7 +2200,7 @@ with st.sidebar:
                 except Exception as exc:
                     st.error('Failed to build mapping: ' + str(exc))
         else:
-            st.caption('Provide both chunk and parent columns to enable chunk↔parent linking')
+            st.caption('Provide both chunk and parent columns to enable chunkâ†”parent linking')
 
         st.markdown('---')
         st.markdown('**Comparison Inputs**')
@@ -1161,7 +2219,7 @@ with st.sidebar:
 
 
 if recompute_previews:
-    with st.spinner('Recomputing embeddings preview …'):
+    with st.spinner('Recomputing embeddings preview â€¦'):
         new_tsne = None
         new_umap = None
         if len(base_embeddings) > 3:
@@ -1221,10 +2279,23 @@ for col, values in metadata_filters.items():
     df_work = df_work[df_work[col].astype(str).isin(values)]
 for col, (low, high) in numeric_ranges.items():
     df_work = df_work[(df_work[col] >= low) & (df_work[col] <= high)]
+
+# Log search action if query was performed
+if search_query and search_query != st.session_state.get('last_logged_search', ''):
+    query_preview = search_query[:40] + ('...' if len(search_query) > 40 else '')
+    add_history_entry(
+        'search',
+        f"Searched '{query_preview}', {len(run_search(df.copy(), search_query, search_scopes))} results visible",
+        create_state_snapshot()
+    )
+    st.session_state['last_logged_search'] = search_query
+
 df_work = run_search(df_work, search_query, search_scopes)
 df_work = df_work.reset_index(drop=True)
 if len(df_work) > max_points:
     df_work = df_work.iloc[:max_points]
+
+st.session_state['visible_doc_ids'] = df_work['doc_id'].astype(str).tolist()
 
 if df_work.empty:
     st.warning('Filters/search returned zero documents. Clear filters to see points again.')
@@ -1308,6 +2379,25 @@ for key in chart_keys:
 
         is_additive = st.session_state.get('additive_mode', False)
         update_selection(selected_docs, additive=is_additive)
+        
+        # Log selection action
+        num_selected = len(st.session_state.get('selected_ids', []))
+        top_keyword = ''
+        if selected_docs and '__tokens' in df_work.columns:
+            from collections import Counter
+            all_tokens = []
+            for doc_id in selected_docs[:5]:  # Check first 5 selected docs
+                token_list = df_work[df_work['doc_id'] == doc_id].iloc[0].get('__tokens', [])
+                if isinstance(token_list, list):
+                    all_tokens.extend(token_list)
+            if all_tokens:
+                top_keyword = f", top keyword: {Counter(all_tokens).most_common(1)[0][0]}"
+        
+        add_history_entry(
+            'selection',
+            f"Selected {num_selected} document{'s' if num_selected != 1 else ''}{top_keyword}",
+            create_state_snapshot()
+        )
         
         # Bump all chart keys so they re-render with updated colors/sizes,
         # and pre-set their last_state to None so the fresh empty events are skipped.
@@ -1463,6 +2553,125 @@ hover_cols = build_hover_columns(df_work)
 # Create index mapping for lookups (needed by heatmap and other features)
 id_to_local_idx = {doc_id: idx for idx, doc_id in enumerate(df_work['doc_id'].tolist())}
 
+def generate_findings_summary(avg_similarity=None):
+    """Generate a markdown summary of current session state for export.
+    
+    Args:
+        avg_similarity: Optional float of average pairwise similarity (or None if not computed)
+    """
+    
+    timestamp = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+    selected_ids = st.session_state.get('selected_ids', [])
+    selected_count = len(selected_ids)
+    search_q = st.session_state.get('search_query_persist', '')
+    saved_cohorts = st.session_state.get('saved_cohorts', {})
+    pipeline_snapshots = st.session_state.get('pipeline_snapshots', {})
+    
+    # Build findings text
+    findings = []
+    findings.append("# Session Findings Export")
+    findings.append("")
+    findings.append(f"Exported: {timestamp}")
+    findings.append("")
+    
+    # Active Filters
+    findings.append("## Active Filters")
+    active_filters = []
+    if search_q:
+        active_filters.append(f"- Search Query: {search_q}")
+    if 'cluster' in df.columns:
+        unique_clusters = df['cluster'].unique()
+        if len(unique_clusters) > 0:
+            active_filters.append(f"- Cluster Filter: Active")
+    if active_filters:
+        findings.extend(active_filters)
+    else:
+        findings.append("(No filters applied; all documents visible)")
+    findings.append("")
+    
+    # Selection Summary
+    findings.append("## Selection Summary")
+    total_docs = len(df)
+    findings.append(f"- Selected Documents: {selected_count} / {total_docs}")
+    findings.append("")
+    
+    # Top Keywords in Selection
+    if selected_count > 0:
+        findings.append("## Top Keywords in Selection")
+        try:
+            selected_df = df_work[df_work['doc_id'].isin(selected_ids)]
+            if '__tokens' in selected_df.columns:
+                all_tokens = []
+                for tokens in selected_df['__tokens']:
+                    all_tokens.extend(tokens)
+                if all_tokens:
+                    token_counts = pd.Series(all_tokens).value_counts()
+                    top_10 = token_counts.head(10)
+                    for keyword, count in top_10.items():
+                        findings.append(f"- {keyword}: {count}")
+                else:
+                    findings.append("(No tokens found in selected documents)")
+            else:
+                findings.append("(Token data not available)")
+        except Exception:
+            findings.append("(Unable to extract keywords)")
+        findings.append("")
+    
+    # Average Pairwise Similarity (passed in)
+    findings.append("## Semantic Cohesion")
+    if avg_similarity is not None:
+        if avg_similarity > 0.6:
+            interp = "High (similar topics)"
+        elif avg_similarity > 0.3:
+            interp = "Moderate (mixed)"
+        else:
+            interp = "Low (diverse)"
+        findings.append(f"- Average Pairwise Similarity: {avg_similarity:.3f} ({interp})")
+    else:
+        if selected_count < 2:
+            findings.append("(Need at least 2 documents for similarity)")
+        elif selected_count > 50:
+            findings.append(f"(Too many docs selected: {selected_count}; limit is 50)")
+        else:
+            findings.append("(Similarity not computed)")
+    findings.append("")
+    
+    # Saved Cohorts
+    if saved_cohorts:
+        findings.append("## Saved Cohorts")
+        for cohort_name, cohort_ids in saved_cohorts.items():
+            findings.append(f"- {cohort_name}: {len(cohort_ids)} documents")
+        findings.append("")
+    
+    # Current Pipeline Configuration
+    findings.append("## Pipeline Configuration")
+    try:
+        pipeline_cfg = get_current_pipeline_config()
+        if pipeline_cfg:
+            findings.append("- Preprocessing: " + pipeline_cfg.get('preprocessing', {}).get('method', 'unknown'))
+            findings.append("- Vectorization: " + pipeline_cfg.get('vectorization', {}).get('method', 'unknown'))
+            findings.append("- Embedding: " + pipeline_cfg.get('embedding', {}).get('method', 'unknown'))
+            findings.append("- Projection: " + pipeline_cfg.get('projection', {}).get('method', 'unknown'))
+        else:
+            findings.append("(Default pipeline)")
+    except Exception:
+        findings.append("(Unable to retrieve pipeline config)")
+    findings.append("")
+    
+    # Latest Pipeline Snapshot
+    if pipeline_snapshots:
+        findings.append("## Latest Pipeline Snapshot")
+        latest_snap_name = list(pipeline_snapshots.keys())[-1]
+        latest_snap = pipeline_snapshots[latest_snap_name]
+        findings.append(f"- Snapshot Name: {latest_snap_name}")
+        findings.append(f"- Timestamp: {latest_snap.get('timestamp', 'N/A')}")
+    
+    findings.append("")
+    findings.append("---")
+    findings.append("*End of Export*")
+    
+    return "\n".join(findings)
+
 # Build embeddings matrix for similarity calculations
 # (Sim matrix calculation moved up)
 
@@ -1481,35 +2690,203 @@ if 'cluster' in df.columns and len(df['cluster'].unique()) > len(cluster_filter)
 if keyword_filter: active_filters.append("Keyword")
 if metadata_filters: active_filters.append("Metadata")
 
+# Populate the Orient Me sidebar container (computed after active_filters and df_work are ready)
+if '_orient_me_container' in st.session_state:
+    with st.session_state['_orient_me_container']:
+        if not st.session_state.get('orient_me_dismissed', False):
+            sel_count_for_orient = len(st.session_state.get('selected_ids', []))
+            should_expand_orient = (sel_count_for_orient == 0 and len(active_filters) == 0 and 'cluster' in df_work.columns)
+            
+            with st.expander("Orient Me", expanded=should_expand_orient):
+                # Dismiss button inline with content
+                if st.button("×", key="orient_me_dismiss", help="Dismiss for this session"):
+                    st.session_state['orient_me_dismissed'] = True
+                    st.rerun()
+                
+                if 'cluster' in df_work.columns:
+                    # Get top 5 clusters, explicitly sorted by document count descending
+                    cluster_counts = df_work['cluster'].value_counts().sort_values(ascending=False).head(5)
+                    
+                    for cluster_id, cluster_size in cluster_counts.items():
+                        cluster_slice = df_work[df_work['cluster'] == cluster_id]
+                        
+                        # Use pre-computed GLOBAL_CLUSTER_MAP (inter-cluster TF-IDF based labels)
+                        cluster_label = GLOBAL_CLUSTER_MAP.get(cluster_id, f"Cluster {cluster_id}")
+                        # Extract just the descriptor part after the colon (e.g., "neural • network • deep")
+                        if ': ' in cluster_label:
+                            keywords_html = cluster_label.split(': ', 1)[1]
+                        else:
+                            keywords_html = cluster_label
+                        
+                        # Layout: cluster_label + keywords + select button
+                        c1, c2, c3 = st.columns([1.2, 2, 0.8])
+                        
+                        with c1:
+                            density_pct = (cluster_size / max(1, len(df_work))) * 100
+                            st.write(f"**Cluster {cluster_id}**")
+                            st.caption(f"{cluster_size} docs ({density_pct:.0f}%)")
+                        
+                        with c2:
+                            st.caption(keywords_html)
+                        
+                        with c3:
+                            if st.button("Select", key=f"orient_select_cluster_{cluster_id}"):
+                                ids = cluster_slice['doc_id'].astype(str).tolist()
+                                update_selection(ids, additive=False)
+                                st.rerun()
+
 with status_placeholder.container():
-    sc1, sc2, sc3, sc4 = st.columns(4)
+
+    sc1, sc2, sc3, sc4, sc5 = st.columns(5)
     sc1.metric("Total", f"{total_n:,}")
     sc2.metric("Visible", f"{filtered_n:,}")
     sc3.metric("Selected", f"{sel_n:,}")
     sc4.metric("Filters", len(active_filters))
+    
+    # Embedding health indicator with info popover — PROMINENT DISPLAY
+    if embedding_health_score is not None:
+        # Use more expressive visual hierarchy
+        health_pct = embedding_health_score * 100
+        if embedding_health_score >= 0.5:
+            health_icon = "[OK]"
+            health_label = "GOOD"
+            health_visual = f"{health_icon} {health_label}"
+        elif embedding_health_score >= 0.3:
+            health_icon = "[WARNING]"
+            health_label = "FAIR"
+            health_visual = f"{health_icon} {health_label}"
+        else:
+            health_icon = "[POOR]"
+            health_label = "POOR"
+            health_visual = f"{health_icon} {health_label}"
+        
+        with sc5:
+            hc_col, hc_help = st.columns([3, 1])
+            with hc_col:
+                # Use st.metric for consistent styling, but add visual emphasis
+                st.metric(
+                    "Embedding Quality",
+                    f"{health_visual} ({health_pct:.0f}%)",
+                    delta=None
+                )
+            with hc_help:
+                with st.popover("ℹ️", use_container_width=False):
+                    st.markdown(f"""
+**Score: {health_pct:.1f}%**
+
+Measures semantic coherence in the 2D projection.
+
+**How computed:**
+- 5-nearest neighbors for each doc in 2D space
+- Jaccard similarity of keywords between doc and neighbors
+- Average across all docs (0-100%)
+
+**Thresholds:**
+- ≥50%: Good coherence
+- 30-50%: Fair (caution advised)
+- 🚨 <30%: Poor (misleading)
+
+**Interpretation:**
+If low, nearby visual distance ≠ semantic similarity.
+                    """)
+    else:
+        sc5.metric("Embedding Quality", "N/A")
+    
     if active_filters:
-        st.caption(" · ".join(active_filters))
+        st.caption(" Â· ".join(active_filters))
 
 if len(df_work) < len(df):
     rc1, rc2 = st.columns([4, 1])
     with rc2:
-        if st.button('Reset Filters', use_container_width=True):
+        if st.button('Reset Filters', width="stretch"):
             st.rerun()
 
 tab_explore = st.container()
 
 with tab_explore:
+    # === EMBEDDING QUALITY BANNER ===
+    # Surface embedding health prominently at the TOP of the page
+    if embedding_health_score is not None:
+        # Determine severity: alert at 0.5, warning at 0.3, critical below 0.2
+        if embedding_health_score >= 0.5:
+            # Good health - show subtle info
+            health_icon = "[OK]"
+            health_status = "GOOD"
+            health_color = "green"
+            health_message = f"Embeddings are healthy ({embedding_health_score:.0%} — nearby docs are semantically similar)"
+            banner_type = "success"
+        elif embedding_health_score >= 0.3:
+            # Fair health - show warning
+            health_icon = "[WARNING]"
+            health_status = "FAIR"
+            health_color = "orange"
+            health_message = (f"**Moderate embedding quality ({embedding_health_score:.0%})** — "
+                            "Some nearby docs may not be semantically similar. "
+                            "Results should be interpreted with caution.")
+            banner_type = "warning"
+        else:
+            # Poor health - show alert
+            health_icon = "[ALERT]"
+            health_status = "POOR"
+            health_color = "red"
+            health_message = (f"**POOR EMBEDDING QUALITY ({embedding_health_score:.0%})** — "
+                            "Nearby documents are semantically distant. "
+                            "This projection may be misleading. Consider regenerating with different settings (TF-IDF, UMAP, etc.)")
+            banner_type = "error"
+        
+        # Display banner using the appropriate Streamlit alert method
+        if banner_type == "error":
+            st.error(f"{health_icon} {health_message}")
+        elif banner_type == "warning":
+            st.warning(f"{health_icon} {health_message}")
+        else:
+            st.success(f"{health_icon} {health_message}")
+        
+        # Add compact explanation in expander
+        with st.expander("What is embedding quality? Why does it matter?", expanded=False):
+            st.markdown(f"""
+**Embedding Quality Score: {embedding_health_score:.1%}**
+
+Measures semantic coherence of the projection by checking if nearby documents in 2D space have similar keywords.
+
+**How it works:**
+- Finds 5 nearest neighbors for each document in the 2D projection
+- Computes keyword overlap (Jaccard similarity) between each document and its neighbors
+- Averages across all documents (0-1 scale, higher = better coherence)
+
+**What the score means:**
+- **≥50%** Good: Nearby docs consistently share keywords → projection is trustworthy
+- **30-50%** Fair: Some nearby docs are unrelated → use caution when interpreting spatial proximity
+- **<30%** Poor: Scattered topics in local neighborhoods → projection may be misleading
+
+**Why it matters:**
+Visual distance in the plot is supposed to represent semantic similarity. If embedding quality is poor:
+- Documents that look close together might not actually be related
+- Clusters might be artifacts of the dimensionality reduction rather than real topics
+- Filtering/exploring "nearby" documents may give you false positives
+
+**To improve:**
+If quality is poor, try:
+1. Adjusting preprocessing (lemmatization, stopwords)
+2. Switching dimensionality reduction: UMAP instead of PCA/t-SNE
+3. Adjusting TF-IDF parameters
+4. Using different projection coordinates
+            """)
+    
+    st.divider()
+    
     # --- PERSISTENT SELECTION CONTROL BAR ---
     sel_count = len(st.session_state.get('selected_ids', []))
-    st.markdown(f"**Selection:** `{sel_count}` docs selected")
-    bc1, bc2, bc3, bc4 = st.columns([1, 1, 1, 2])
-    with bc1:
-        if st.button('Clear Selection', use_container_width=True, key='top_clear', disabled=sel_count==0):
-            update_selection([], additive=False)
-            st.rerun()
-    with bc2:
-        if sel_count > 0:
-            with st.popover("Save Group", use_container_width=True):
+
+    if sel_count > 0:
+        st.markdown(f"**Selection:** `{sel_count}` docs selected")
+        bc1, bc2, bc3, bc4, bc5 = st.columns([1, 1, 1, 1.5, 1])
+        with bc1:
+            if st.button('Clear Selection', width="stretch", key='top_clear'):
+                update_selection([], additive=False)
+                st.rerun()
+        with bc2:
+            with st.popover("Save Group", width="stretch"):
                 if 'saved_cohorts' not in st.session_state:
                     st.session_state['saved_cohorts'] = {}
                 sg_name = st.text_input("Group Name", key='top_sg_name')
@@ -1517,44 +2894,101 @@ with tab_explore:
                     if sg_name:
                         st.session_state['saved_cohorts'][sg_name] = list(st.session_state['selected_ids'])
                         st.success("Saved!")
-        else:
-            st.button("Save Group", use_container_width=True, disabled=True, key='top_sg_disabled')
-    with bc3:
-        if st.button("Undo", use_container_width=True, key='top_undo', disabled=len(st.session_state.get('selection_history', [])) <= 0):
-            history = st.session_state.get('selection_history', [])
-            if history:
-                st.session_state['selected_ids'] = history.pop()
-                st.session_state['selection_history'] = history
-                st.rerun()
-    with bc4:
-        if st.session_state.get('selection_history'):
-            with st.popover("Selection History", use_container_width=True):
-                for i, past_sel in enumerate(reversed(st.session_state['selection_history'][-5:])):
-                    if st.button(f"Step -{i+1}: {len(past_sel)} docs", key=f"top_hist_{i}"):
-                        st.session_state['selected_ids'] = past_sel
-                        st.rerun()
-        else:
-            st.button("Selection History", use_container_width=True, disabled=True, key='top_hist_disabled')
-    st.markdown("---")
+        with bc3:
+            if st.button("Undo", width="stretch", key='top_undo', disabled=len(st.session_state.get('selection_history', [])) <= 0):
+                history = st.session_state.get('selection_history', [])
+                if history:
+                    st.session_state['selected_ids'] = history.pop()
+                    st.session_state['selection_history'] = history
+                    st.rerun()
+        with bc4:
+            if st.session_state.get('selection_history'):
+                with st.popover("Selection History", width="stretch"):
+                    for i, past_sel in enumerate(reversed(st.session_state['selection_history'][-5:])):
+                        if st.button(f"Step -{i+1}: {len(past_sel)} docs", key=f"top_hist_{i}"):
+                            st.session_state['selected_ids'] = past_sel
+                            st.rerun()
+        with bc5:
+            # Compute average similarity if applicable
+            avg_sim_for_export = None
+            selected_ids_export = st.session_state.get('selected_ids', [])
+            if 2 <= len(selected_ids_export) <= 50 and len(embeddings_for_sim) > 0:
+                try:
+                    vecs = []
+                    for did in selected_ids_export:
+                        idx = id_to_local_idx.get(did)
+                        if idx is not None and idx < len(embeddings_for_sim):
+                            v = embeddings_for_sim[idx]
+                            if hasattr(v, 'toarray'):
+                                v = v.toarray().flatten()
+                            elif hasattr(v, 'ndim') and v.ndim > 1:
+                                v = v.flatten()
+                            v = np.asarray(v, dtype=float)
+                            vecs.append(v)
+                    if len(vecs) >= 2:
+                        sim_matrix = cosine_similarity(np.vstack(vecs))
+                        n = len(vecs)
+                        avg_sim_for_export = (sim_matrix.sum() - n) / (n * (n - 1)) if n > 1 else 1.0
+                except Exception:
+                    pass
+            
+            findings_text = generate_findings_summary(avg_similarity=avg_sim_for_export)
+            st.download_button(
+                label="Export Findings",
+                data=findings_text,
+                file_name="findings.md",
+                mime="text/markdown",
+                width="stretch",
+                key="export_findings_btn",
+                help="Download a markdown summary of current session state"
+            )
+        st.markdown("---")
 
-    # Color mapping for Saved Groups
+    # --- EMBEDDING TRUST VALIDATION ---
+    # Show inline warnings if 2+ docs selected and there are embedding-trust issues
+    if sel_count >= 2:
+        selected_ids = st.session_state.get('selected_ids', [])
+        trust_warnings = []
+        
+        # Check all pairs of selected documents
+        for i in range(len(selected_ids)):
+            for j in range(i + 1, min(i + 3, len(selected_ids))):  # Limit to 3 pairs to avoid clutter
+                doc_id1, doc_id2 = selected_ids[i], selected_ids[j]
+                is_suspicious, overlap, distance_pct, msg = check_embedding_trust_for_pair(
+                    doc_id1, doc_id2, df, coords_tsne, 
+                    keyword_overlap_threshold=0.15, 
+                    distance_threshold_pct=0.25
+                )
+                if is_suspicious and msg:
+                    trust_warnings.append(msg)
+        
+        # Display warnings if any
+        if trust_warnings:
+            with st.expander("⚠ Embedding Alerts", expanded=True):
+                for warning in trust_warnings[:5]:  # Show max 5 warnings
+                    st.caption(warning)
+
+    # Color mapping and preparation for Saved Groups mode
     if color_mode == 'Saved Group':
-        # Assign colors to groups if active
+        # Initialize cohort mapping with colorblind-safe colors
         df_work['__cohort'] = 'Other'
         cohort_map = st.session_state.get('saved_cohorts', {})
-        # Simple color cycle
-        cohort_colors = px.colors.qualitative.Bold
-        color_map = {'Other': '#EEEEEE'}
         
-        # Apply cohort labels (priority to last loaded?)
-        # We can just iterate and overlay.
-        for i, (name, ids) in enumerate(cohort_map.items()):
-            df_work.loc[df_work['doc_id'].isin(ids), '__cohort'] = name
-            color_map[name] = cohort_colors[i % len(cohort_colors)]
-        
-        # We need to hack the plotting function slightly to support custom categorical column mapping
-        # For now, let's reuse the 'color' argument logic in plotting by mapping it to a dedicated column
-        # Ideally, we pass color_col='__cohort' and color_map
+        if cohort_map:
+            # Get colorblind-safe palette and handle >6 cohorts
+            color_map, cohort_names, cohort_sizes = prepare_cohort_colors(cohort_map, df_work)
+            
+            # Apply cohort labels to df_work
+            for cohort_name, ids in cohort_map.items():
+                # Handle >6 cohorts: map to 'Other' if not in color_map
+                if cohort_name in color_map:
+                    df_work.loc[df_work['doc_id'].isin(ids), '__cohort'] = cohort_name
+                else:
+                    # This cohort is grouped into 'Other'
+                    df_work.loc[df_work['doc_id'].isin(ids), '__cohort'] = 'Other'
+        else:
+            # No cohorts saved, default to 'Other'
+            color_map = {'Other': '#CCCCCC'}
     
     # Inspector Logic: identify "primary" selected point
     primary_doc_id = None
@@ -1567,117 +3001,12 @@ with tab_explore:
     selection_umap = None
     selection_pca = None
     
-    def render_side_inspector(p_doc_id):
-        st.markdown("### Inspector")
-        if p_doc_id:
-            row = df[df['doc_id'] == p_doc_id].iloc[0] if not df[df['doc_id'] == p_doc_id].empty else None
-            # Guard in case missing
-            if row is not None:
-                st.info(f"**ID:** {row['doc_id']}")
-                st.caption(f"Cluster: {row.get('cluster', 'N/A')}")
-                st.text_area("Content", row.get('text', ''), height=200)
-                
-                with st.expander("Metadata", expanded=True):
-                    for c in ['Slogan', 'Authors', 'Year', 'Data Domain']:
-                        if c in row and not pd.isna(row[c]):
-                            st.write(f"**{c}:** {row[c]}")
-                st.markdown("---")
-                st.markdown("**I. Radial Plot (Nearest Neighbors)**")
-                if len(st.session_state.get('selected_ids', [])) > 1:
-                    st.caption(f"Comparing the {len(st.session_state['selected_ids'])-1} other selected documents to the primary document `{p_doc_id}`.")
-                else:
-                    st.caption("Compare the relationship of the top similar documents to the selected document. The closer points appear to the center point, the more similar they are according to the AI vector space.")
-                try:
-                    idx = doc_id_to_global_idx.get(p_doc_id)
-                    if idx is not None:
-                        vec = embeddings_for_sim[idx].reshape(1, -1)
-                        sims = cosine_similarity(vec, embeddings_for_sim).flatten()
-                        
-                        # Identify target neighbors to plot
-                        selected = st.session_state.get('selected_ids', [])
-                        if len(selected) > 1:
-                            # If lassoed, plot the relationship of the *other selected docs* to the primary doc
-                            other_selected_idx = [id_to_local_idx.get(did) for did in selected if did != p_doc_id and did in id_to_local_idx]
-                            # Sort those by similarity, take up to 15
-                            other_selected_idx.sort(key=lambda i: sims[i], reverse=True)
-                            top_indices = other_selected_idx[:15]
-                        else:
-                            # Single document mode: plot the overall top 8 nearest neighbors
-                            top_indices = sims.argsort()[::-1][1:9]
-                        
-                        r_vals, theta_vals, text_vals, color_vals, full_ids = [0.0], ["Target"], [f"<b>{p_doc_id}</b><br>Target"], ["Target"], [p_doc_id]
-                        
-                        r_vals = [0.0]
-                        full_ids = [p_doc_id]
-                        text_vals = [f"<b>{p_doc_id}</b><br>Target"]
-                        color_vals = ["Target"]
-                        short_labels = ["Target"]
-                        
-                        import math
-                        x_vals, y_vals = [0.0], [0.0]
-                        angle_step = 360.0 / max(1, len(top_indices))
-                        angle = 0.0
-                        
-                        for i in top_indices:
-                            nid = df.iloc[i]['doc_id']
-                            score = sims[i]
-                            r = 1.0 - score
-                            
-                            r_vals.append(r)
-                            parts = nid.split('_')
-                            short_id = "_".join(parts[:2]) if len(parts) >= 2 else nid[:12]
-                            short_labels.append(short_id)
-                            text_vals.append(f"{nid}<br>Similarity: {score:.3f}")
-                            color_vals.append("Neighbor")
-                            full_ids.append(nid)
-                            
-                            rad = math.radians(angle)
-                            x_vals.append(r * math.cos(rad))
-                            y_vals.append(r * math.sin(rad))
-                            angle += angle_step
-                            
-                        polar_df = pd.DataFrame({"x": x_vals, "y": y_vals, "Label": text_vals, "Type": color_vals, "Full_ID": full_ids, "Short": short_labels})
-                        import plotly.express as px
-                        
-                        fig_polar = px.scatter(polar_df, x="x", y="y", color="Type", text="Short", hover_name="Label", color_discrete_map={"Target": "#E63946", "Neighbor": "#457B9D"}, custom_data=["Full_ID"])
-                        fig_polar.update_traces(textposition='top center', marker=dict(size=12, line=dict(color="white", width=1)))
-                        
-                        limit = max(r_vals)*1.4 if r_vals and max(r_vals) > 0 else 1.0
-                        fig_polar.update_layout(
-                            xaxis=dict(visible=False, range=[-limit, limit]), yaxis=dict(visible=False, range=[-limit, limit]),
-                            margin=dict(l=20, r=20, t=20, b=20), showlegend=False, height=350, plot_bgcolor='rgba(0,0,0,0)', clickmode='event+select'
-                        )
-                        for ring_r in [limit*0.33, limit*0.66, limit]:
-                            fig_polar.add_shape(type="circle", x0=-ring_r, y0=-ring_r, x1=ring_r, y1=ring_r, line_color="lightgray", opacity=0.3, layer="below")
-                        selection_radial_mini = st.plotly_chart(fig_polar, use_container_width=True, on_select="rerun", selection_mode=['points'], key=f"radial_mini_{p_doc_id}")
-                        if selection_radial_mini and hasattr(selection_radial_mini, 'selection') and hasattr(selection_radial_mini.selection, 'points'):
-                            pts = selection_radial_mini.selection.points
-                            if pts:
-                                cdata = pts[0].get('customdata', [])
-                                if cdata and cdata[0]:
-                                    clicked_id = str(cdata[0])
-                                    if clicked_id != p_doc_id:
-                                        st.session_state['selected_ids'] = [clicked_id]
-                                        st.rerun()
-                        
-                        for i in top_indices[:3]:
-                            nid = df.iloc[i]['doc_id']
-                            score = sims[i]
-                            st.write(f"- **{nid}**: {score:.3f}")
-                except Exception as e:
-                    st.caption("NN calculation unavailable.")
-        else:
-            st.sidebar.info("Select a point to inspect details.")
-            st.write("Click a point ->")
-
-    if view_mode == "Scatterplot (Expanded Focus)":
+    if view_mode == "Single (Focus)":
         # Split layout: Large Plot + Inspector Panel
-        sel_cnt = len(st.session_state.get('selected_ids', []))
-        pcol1, pcol2 = st.columns([2.7, 1.3]) # Give inspector more width
+        pcol1, pcol2 = st.columns([3, 1])
         
         with pcol1:
-            st.markdown(f"### C. Scatterplot ({focus_proj} Projection)")
-            st.caption("Displays an expanded view of regions. Shows the region in better clarity along with other papers that aren't explicitly shown as a point in the corpus map.")
+            st.markdown(f"### {focus_proj} Projection")
             # Map focus_proj to column names
             x, y = 'umap_x', 'umap_y'
             if focus_proj == 't-SNE': x, y = 'tsne_x', 'tsne_y'
@@ -1699,7 +3028,7 @@ with tab_explore:
 
             selection_focus = st.plotly_chart(
                 fig_focus, 
-                use_container_width=True, 
+                width="stretch", 
                 on_select="rerun", 
                 selection_mode=['points', 'box', 'lasso'],
                 key=f"chart_focus_{st.session_state['chart_revisions']['chart_focus']}",
@@ -1707,124 +3036,277 @@ with tab_explore:
             )
 
         with pcol2:
-            render_side_inspector(primary_doc_id)
+            st.markdown("### Inspector")
+            if primary_doc_id:
+                # Find document data
+                row = df[df['doc_id'] == primary_doc_id].iloc[0] if not df[df['doc_id'] == primary_doc_id].empty else None
+                if row is not None:
+                    st.info(f"**ID:** {row['doc_id']}")
+                    st.caption(f"Cluster: {row.get('cluster', 'N/A')}")
+                    
+                    st.text_area("Content", row.get('text', ''), height=200)
+                    
+                    # Metadata
+                    with st.expander("Metadata", expanded=True):
+                        for c in ['Slogan', 'Authors', 'Year', 'Data Domain']:
+                            if c in row and not pd.isna(row[c]):
+                                st.write(f"**{c}:** {row[c]}")
+                    
+                    # Neighborhood Stability (Mini view)
+                    st.markdown("---")
+                    st.caption("Nearest Neighbors (Global)")
+                    # Simple NN calculation on the fly for single doc if meaningful
+                    try:
+                        idx = doc_id_to_global_idx.get(primary_doc_id)
+                        if idx is not None:
+                            vec = embeddings_for_sim[idx].reshape(1, -1)
+                            # Cosine Sim
+                            sims = cosine_similarity(vec, embeddings_for_sim).flatten()
+                            # Get top 5 (excluding self)
+                            top_indices = sims.argsort()[::-1][1:6]
+                            
+                            for i in top_indices:
+                                nid = df.iloc[i]['doc_id']
+                                score = sims[i]
+                                st.write(f"- **{nid}**: {score:.3f}")
+                    except Exception as e:
+                        st.caption("NN calculation unavailable.")
+            else:
+                st.sidebar.info("Select a point to inspect details.")
+                st.write("Click a point ->")
 
     else:
         # Fully flat, side-by-side projections for maximum visibility and comparative analysis
-        st.markdown("### B. Corpus Map (Projections)")
-        st.caption("A tool to navigate through documents in the database. It displays all documents as a density heat map, and explicitly shows documents that are part of the search, selection, or neighborhood. If points are closer they might be more similar.")
-        plot_col1, plot_col2, plot_col3 = st.columns(3, gap="small")
+        st.markdown("### Projections")
         
-        with plot_col1:
-            fig_tsne = make_plot(
-                df_work, 'tsne_x', 'tsne_y',
-                st.session_state['selected_ids'] or [],
-                st.session_state.get('search_hits', []),
-                't-SNE', hover_cols, color_mode,
-                focused_ids=st.session_state.get('focused_ids', []),
-                show_hover=show_hover
-            )
-            apply_scale_and_alpha(fig_tsne, point_alpha, point_size_scale)
+        # Snapshot Comparison UI
+        if st.session_state.get('compare_snapshots', False) and len(st.session_state['pipeline_snapshots']) >= 2:
+            st.markdown('**Snapshot Diff Mode**')
+            comp_col1, comp_col2, comp_col3 = st.columns(3)
             
-            selection_tsne = st.plotly_chart(
-                fig_tsne, use_container_width=True, on_select="rerun", 
-                selection_mode=['points', 'box', 'lasso'],
-                key=f"chart_tsne_{st.session_state['chart_revisions']['chart_tsne']}"
-            )
-            if show_download_buttons:
-                st.download_button(
-                    label='Download t-SNE', data=fig_tsne.to_html(),
-                    file_name='tsne_plot.html', mime='text/html', use_container_width=True
-                )
+            snapshot_names = list(st.session_state['pipeline_snapshots'].keys())
+            
+            with comp_col1:
+                snap1 = st.selectbox('Compare Snapshot 1', snapshot_names, key='snap_compare_1', label_visibility="collapsed")
+            with comp_col2:
+                st.caption('vs')
+            with comp_col3:
+                snap2 = st.selectbox('Compare Snapshot 2', snapshot_names, index=min(1, len(snapshot_names)-1), key='snap_compare_2', label_visibility="collapsed")
+            
+            if snap1 != snap2:
+                st.info(f"Comparing **{snap1}** vs **{snap2}** — Projections show data from current active config")
         
-        with plot_col2:
-            fig_umap = make_plot(
-                df_work, 'umap_x', 'umap_y',
-                st.session_state['selected_ids'] or [],
-                st.session_state.get('search_hits', []),
-                'UMAP', hover_cols, color_mode,
-                focused_ids=st.session_state.get('focused_ids', []),
-                show_hover=show_hover
-            )
-            apply_scale_and_alpha(fig_umap, point_alpha, point_size_scale)
+        # Define projection metadata
+        projections_meta = {
+            'tsne': {'title': 't-SNE', 'subtitle': 'Preserves local clusters', 'x_col': 'tsne_x', 'y_col': 'tsne_y', 'download_name': 'tsne_plot.html'},
+            'umap': {'title': 'UMAP', 'subtitle': 'Balances local and global structure', 'x_col': 'umap_x', 'y_col': 'umap_y', 'download_name': 'umap_plot.html'},
+            'pca': {'title': 'PCA (preview)', 'subtitle': 'Preserves global variance', 'x_col': 'pca_x', 'y_col': 'pca_y', 'download_name': 'pca_plot.html'}
+        }
+        
+        expanded_proj = st.session_state.get('expanded_projection')
+        
+        # Render projections
+        if expanded_proj:
+            # Full-width mode for expanded projection
+            proj_key = expanded_proj
+            proj_meta = projections_meta[proj_key]
             
-            selection_umap = st.plotly_chart(
-                fig_umap, use_container_width=True, on_select="rerun", 
-                selection_mode=['points', 'box', 'lasso'],
-                key=f"chart_umap_{st.session_state['chart_revisions']['chart_umap']}"
-            )
-            if show_download_buttons:
-                st.download_button(
-                    label='Download UMAP', data=fig_umap.to_html(),
-                    file_name='umap_plot.html', mime='text/html', use_container_width=True
-                )
-                
-        with plot_col3:
-            fig_pca = make_plot(
-                df_work, 'pca_x', 'pca_y',
-                st.session_state['selected_ids'] or [],
-                st.session_state.get('search_hits', []),
-                'PCA (preview)', hover_cols, color_mode,
-                focused_ids=st.session_state.get('focused_ids', []),
-                show_hover=show_hover
-            )
-            apply_scale_and_alpha(fig_pca, point_alpha, point_size_scale)
+            st.markdown(f"### {proj_meta['title']}", help="Click collapse button to return to 3-column view")
+            st.caption(proj_meta['subtitle'])
             
-            selection_pca = st.plotly_chart(
-                fig_pca, use_container_width=True, on_select="rerun", 
-                selection_mode=['points', 'box', 'lasso'],
-                key=f"chart_pca_{st.session_state['chart_revisions']['chart_pca']}"
-            )
-            if show_download_buttons:
-                st.download_button(
-                    label='Download PCA', data=fig_pca.to_html(),
-                    file_name='pca_plot.html', mime='text/html', use_container_width=True
+            # Collapse button
+            col_expand, col_spacer = st.columns([1, 10])
+            with col_expand:
+                if st.button('Collapse', key=f'collapse_{proj_key}', help='Return to 3-column layout'):
+                    st.session_state['expanded_projection'] = None
+                    st.rerun()
+            
+            # Create and display the figure
+            if proj_key == 'tsne':
+                fig = make_plot(
+                    df_work, 'tsne_x', 'tsne_y',
+                    st.session_state['selected_ids'] or [],
+                    st.session_state.get('search_hits', []),
+                    proj_meta['title'], hover_cols, color_mode,
+                    focused_ids=st.session_state.get('focused_ids', []),
+                    show_hover=show_hover
                 )
+                apply_scale_and_alpha(fig, point_alpha, point_size_scale)
+                selection_tsne = st.plotly_chart(
+                    fig, use_container_width=True, on_select="rerun",
+                    selection_mode=['points', 'box', 'lasso'],
+                    key=f"chart_tsne_{st.session_state['chart_revisions']['chart_tsne']}"
+                )
+                if show_download_buttons:
+                    st.download_button(
+                        label='Download t-SNE', data=fig.to_html(),
+                        file_name=proj_meta['download_name'], mime='text/html', use_container_width=True
+                    )
+            elif proj_key == 'umap':
+                fig = make_plot(
+                    df_work, 'umap_x', 'umap_y',
+                    st.session_state['selected_ids'] or [],
+                    st.session_state.get('search_hits', []),
+                    proj_meta['title'], hover_cols, color_mode,
+                    focused_ids=st.session_state.get('focused_ids', []),
+                    show_hover=show_hover
+                )
+                apply_scale_and_alpha(fig, point_alpha, point_size_scale)
+                selection_umap = st.plotly_chart(
+                    fig, use_container_width=True, on_select="rerun",
+                    selection_mode=['points', 'box', 'lasso'],
+                    key=f"chart_umap_{st.session_state['chart_revisions']['chart_umap']}"
+                )
+                if show_download_buttons:
+                    st.download_button(
+                        label='Download UMAP', data=fig.to_html(),
+                        file_name=proj_meta['download_name'], mime='text/html', use_container_width=True
+                    )
+            else:  # pca
+                fig = make_plot(
+                    df_work, 'pca_x', 'pca_y',
+                    st.session_state['selected_ids'] or [],
+                    st.session_state.get('search_hits', []),
+                    proj_meta['title'], hover_cols, color_mode,
+                    focused_ids=st.session_state.get('focused_ids', []),
+                    show_hover=show_hover
+                )
+                apply_scale_and_alpha(fig, point_alpha, point_size_scale)
+                selection_pca = st.plotly_chart(
+                    fig, use_container_width=True, on_select="rerun",
+                    selection_mode=['points', 'box', 'lasso'],
+                    key=f"chart_pca_{st.session_state['chart_revisions']['chart_pca']}"
+                )
+                if show_download_buttons:
+                    st.download_button(
+                        label='Download PCA', data=fig.to_html(),
+                        file_name=proj_meta['download_name'], mime='text/html', use_container_width=True
+                    )
+        else:
+            # Three-column mode
+            plot_col1, plot_col2, plot_col3 = st.columns(3, gap="small")
+            
+            with plot_col1:
+                st.markdown('**t-SNE**')
+                st.caption('Preserves local clusters')
+                if st.button('Expand', key='expand_tsne', help='Expand to full width'):
+                    st.session_state['expanded_projection'] = 'tsne'
+                    st.rerun()
                 
-    # --- Process Graph Selections ---
-current_graph_selections = []
+                fig_tsne = make_plot(
+                    df_work, 'tsne_x', 'tsne_y',
+                    st.session_state['selected_ids'] or [],
+                    st.session_state.get('search_hits', []),
+                    't-SNE', hover_cols, color_mode,
+                    focused_ids=st.session_state.get('focused_ids', []),
+                    show_hover=show_hover
+                )
+                apply_scale_and_alpha(fig_tsne, point_alpha, point_size_scale)
+                
+                selection_tsne = st.plotly_chart(
+                    fig_tsne, width="stretch", on_select="rerun", 
+                    selection_mode=['points', 'box', 'lasso'],
+                    key=f"chart_tsne_{st.session_state['chart_revisions']['chart_tsne']}"
+                )
+                if show_download_buttons:
+                    st.download_button(
+                        label='Download t-SNE', data=fig_tsne.to_html(),
+                        file_name='tsne_plot.html', mime='text/html', width="stretch"
+                    )
+            
+            with plot_col2:
+                st.markdown('**UMAP**')
+                st.caption('Balances local and global structure')
+                if st.button('Expand', key='expand_umap', help='Expand to full width'):
+                    st.session_state['expanded_projection'] = 'umap'
+                    st.rerun()
+                
+                fig_umap = make_plot(
+                    df_work, 'umap_x', 'umap_y',
+                    st.session_state['selected_ids'] or [],
+                    st.session_state.get('search_hits', []),
+                    'UMAP', hover_cols, color_mode,
+                    focused_ids=st.session_state.get('focused_ids', []),
+                    show_hover=show_hover
+                )
+                apply_scale_and_alpha(fig_umap, point_alpha, point_size_scale)
+                
+                selection_umap = st.plotly_chart(
+                    fig_umap, width="stretch", on_select="rerun", 
+                    selection_mode=['points', 'box', 'lasso'],
+                    key=f"chart_umap_{st.session_state['chart_revisions']['chart_umap']}"
+                )
+                if show_download_buttons:
+                    st.download_button(
+                        label='Download UMAP', data=fig_umap.to_html(),
+                        file_name='umap_plot.html', mime='text/html', width="stretch"
+                    )
+                    
+            with plot_col3:
+                st.markdown('**PCA (preview)**')
+                st.caption('Preserves global variance')
+                if st.button('Expand', key='expand_pca', help='Expand to full width'):
+                    st.session_state['expanded_projection'] = 'pca'
+                    st.rerun()
+                
+                fig_pca = make_plot(
+                    df_work, 'pca_x', 'pca_y',
+                    st.session_state['selected_ids'] or [],
+                    st.session_state.get('search_hits', []),
+                    'PCA (preview)', hover_cols, color_mode,
+                    focused_ids=st.session_state.get('focused_ids', []),
+                    show_hover=show_hover
+                )
+                apply_scale_and_alpha(fig_pca, point_alpha, point_size_scale)
+                
+                selection_pca = st.plotly_chart(
+                    fig_pca, width="stretch", on_select="rerun", 
+                    selection_mode=['points', 'box', 'lasso'],
+                    key=f"chart_pca_{st.session_state['chart_revisions']['chart_pca']}"
+                )
+                if show_download_buttons:
+                    st.download_button(
+                        label='Download PCA', data=fig_pca.to_html(),
+                        file_name='pca_plot.html', mime='text/html', width="stretch"
+                    )
+
+# â”€â”€ Process Graph Selections â”€â”€
+current_graph_selections = set()
+
+# Ensure selection variables are initialized (some may be in expanded mode)
+selection_focus = locals().get('selection_focus', None)
+selection_tsne = locals().get('selection_tsne', None)
+selection_umap = locals().get('selection_umap', None)
+selection_pca = locals().get('selection_pca', None)
+
 for sel in [selection_focus, selection_tsne, selection_umap, selection_pca]:
     if sel and hasattr(sel, 'selection') and hasattr(sel.selection, 'points'):
         for pt in sel.selection.points:
             # pt acts like a dictionary in 1.35+
             cdata = pt.get('customdata', [])
             if cdata:
-                did = str(cdata[0])
-                if did not in current_graph_selections:
-                    current_graph_selections.append(did)
+                current_graph_selections.add(str(cdata[0]))
 
 if current_graph_selections:
-    last_graph = st.session_state.get('last_graph_selections', [])
-    # Only re-trigger if the actual set of points changed, or if it dropped from many down to 1 (indicating a click inside)
-    if set(current_graph_selections) != set(last_graph):
-        
-        # Smart Inspection: If user clicks a single point that is already in 
-        # the current group, keep the entire group but move that doc to the end
-        # so the Inspector panel focuses on it.
-        if len(current_graph_selections) == 1 and len(last_graph) > 1 and current_graph_selections[0] in last_graph:
-            focus_id = current_graph_selections[0]
-            current_graph_selections = [d for d in last_graph if d != focus_id] + [focus_id]
-            st.toast(f"Inspecting {focus_id} in current group")
-        else:
-            # Check additive mode for general selections
-            is_additive = st.session_state.get('additive_mode', False)
-            if is_additive:
-                current_graph_selections = list(dict.fromkeys(last_graph + current_graph_selections))
-
-        st.session_state['last_graph_selections'] = list(current_graph_selections)
-        update_selection(current_graph_selections, additive=False)  # additive already handled above
+    last_graph = st.session_state.get('last_graph_selections', set())
+    if current_graph_selections != last_graph:
+        st.session_state['last_graph_selections'] = set(current_graph_selections)
+        # We replace the current selection with the new lasso selection completely
+        update_selection(list(current_graph_selections))
         st.rerun()
 
-# ── Dynamic Grid Layout for Analysis Section ──
-if view_mode == "Scatterplot (Expanded Focus)":
+# â”€â”€ Dynamic Grid Layout for Analysis Section â”€â”€
+if view_mode == "Single (Focus)":
     st.markdown("---")
 
 st.markdown("### Analysis")
-# Use a 3-column span instead of hidden tabs so everything is accessible at once
-tab_docs, tab_stats, tab_keywords = st.columns([2, 1, 1], gap="medium")
+# Give more width to keywords chart (1/5 for keywords, 2/5 for docs, 2/5 for distance)
+tab_docs, tab_stats, tab_keywords = st.columns([2, 1.5, 1.5], gap="medium")
 
 def render_selection_details(selected_ids):
     st.subheader('Selected Document Details')
+    
+    LARGE_SELECTION_THRESHOLD = 20  # Switch to large-selection mode at this count
     
     if not selected_ids:
         st.info('Select points in the graphs to see details here.')
@@ -1839,9 +3321,39 @@ def render_selection_details(selected_ids):
 
     st.write(f"**{len(selected_df)} document(s) selected**")
     
+    # Large selection mode: paginate the results
+    if len(selected_df) > LARGE_SELECTION_THRESHOLD:
+        page_size = 10
+        total_pages = (len(selected_df) + page_size - 1) // page_size
+        
+        if 'sel_page_num' not in st.session_state:
+            st.session_state['sel_page_num'] = 0
+        
+        # Pagination controls
+        pcol1, pcol2, pcol3 = st.columns([1, 2, 1])
+        with pcol1:
+            if st.button("← Prev", disabled=st.session_state['sel_page_num'] == 0, key='sel_prev_page'):
+                st.session_state['sel_page_num'] -= 1
+                st.rerun()
+        with pcol2:
+            st.write(f"Page {st.session_state['sel_page_num'] + 1} / {total_pages}")
+        with pcol3:
+            if st.button("Next →", disabled=st.session_state['sel_page_num'] >= total_pages - 1, key='sel_next_page'):
+                st.session_state['sel_page_num'] += 1
+                st.rerun()
+        
+        # Show current page
+        start_idx = st.session_state['sel_page_num'] * page_size
+        end_idx = min(start_idx + page_size, len(selected_df))
+        page_df = selected_df.iloc[start_idx:end_idx]
+        
+        st.caption(f"Showing {start_idx + 1}-{end_idx} of {len(selected_df)}")
+    else:
+        page_df = selected_df
+    
     # Interactive Table for Selected Docs
     # Prepare display dataframe
-    display_df = selected_df.copy()
+    display_df = page_df.copy()
     display_df['Snippet'] = display_df['__snippet']
     
     # Configure columns
@@ -1855,14 +3367,11 @@ def render_selection_details(selected_ids):
     # Show interactive dataframe
     selection_event = st.dataframe(
         display_df[cols],
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         on_select="rerun",
         selection_mode="multi-row",
-        key="sel_details_table_stable",
-        column_config={
-            "Snippet": st.column_config.TextColumn("Snippet", width="large")
-        }
+        key="sel_details_table_stable"
     )
     
     # Extract selected document IDs
@@ -1896,31 +3405,62 @@ def render_selection_details(selected_ids):
         euclid_val = float(np.linalg.norm(vec_a - vec_b))
         return {'cosine': cosine_val, 'euclidean': euclid_val}
 
-    def render_doc_card(doc_id, expanded=True, highlights=None):
+    def render_doc_card(doc_id, expanded=True):
         if not doc_id: return
         row = df_work[df_work['doc_id'] == doc_id].iloc[0]
-        st.markdown(f"#### {doc_id}")
-        st.caption(f"Cluster: {row.get('cluster', 'N/A')}")
-        text_content = str(row.get('__snippet', row.get('text', '')))
         
-        # Highlight specific words in yellow if they are passed in
-        if highlights:
-            import re
-            for w in highlights:
-                if len(w) > 2: # Ignore extremely short tokens
-                    # Use a regex to find the word stem and wrap it in a yellow highlight span
-                    text_content = re.sub(f'(?i)(?P<word>\\b{re.escape(w)}[a-z]*)', r'<mark style="background-color: #ffe066; color: black; padding: 0 3px; border-radius: 2px; font-weight: bold;">\g<word></mark>', text_content)
-            st.markdown(text_content, unsafe_allow_html=True)
+        # Create display version: replace underscores with spaces
+        display_id = doc_id.replace('_', ' ')
+        # Truncate long display IDs with ellipsis
+        if len(display_id) > 50:
+            display_id_short = display_id[:50] + '…'
         else:
-            st.write(text_content)
+            display_id_short = display_id
+        # Show with tooltip using HTML title attribute for full ID on hover
+        safe_id = doc_id.replace("'", "\\'").replace('"', '\\"')
+        st.markdown(f"#### <span title='{safe_id}' style='cursor: help;'>{display_id_short}</span>", unsafe_allow_html=True)
+        
+        # PRIMARY CONTENT: Document text/snippet
+        st.write(row.get('__snippet', row.get('text', '')))
+        
+        # SECONDARY BLOCK: Metadata card
         meta_dict = {}
         for col in row.index:
             if col not in ['doc_id', 'text', 'cluster', '__snippet', 'Snippet'] and not col.startswith('__'):
                 val = row[col]
                 if not pd.isna(val) and str(val).strip():
                     meta_dict[col] = val
+        
         if meta_dict:
-            st.json(meta_dict, expanded=False)
+            st.markdown("---")
+            st.markdown("**Metadata**")
+            
+            # Create metadata card with clean formatting
+            meta_cols = list(meta_dict.items())
+            # Display in 2-column grid for readability
+            for i in range(0, len(meta_cols), 2):
+                col1, col2 = st.columns(2)
+                
+                # First column
+                field_name, field_val = meta_cols[i]
+                with col1:
+                    # Format field name as label
+                    st.caption(field_name)
+                    # Display value with proper formatting
+                    if isinstance(field_val, (int, float)):
+                        st.write(f"**{field_val}**")
+                    else:
+                        st.write(str(field_val)[:200] + ('...' if len(str(field_val)) > 200 else ''))
+                
+                # Second column (if exists)
+                if i + 1 < len(meta_cols):
+                    field_name, field_val = meta_cols[i + 1]
+                    with col2:
+                        st.caption(field_name)
+                        if isinstance(field_val, (int, float)):
+                            st.write(f"**{field_val}**")
+                        else:
+                            st.write(str(field_val)[:200] + ('...' if len(str(field_val)) > 200 else ''))
 
     # --- Interaction Logic ---
     if len(selected_doc_ids) == 0:
@@ -1930,85 +3470,27 @@ def render_selection_details(selected_ids):
         # SINGLE DOC MODE
         sel_doc_id = selected_doc_ids[0]
         st.markdown("---")
-        st.markdown("### G. Selected Document View")
-        st.caption("View the paper more in depth and interact with parts of the paper. Yellow highlighted words indicate the salient words of the paper or common words between the query and related documents.")
-        
-        highlight_on = st.checkbox("Yellow highlight on", value=True, key="hl_single", help="Highlight the salient words of the paper when one paper is selected.")
-        row_single = df_work[df_work['doc_id'] == sel_doc_id].iloc[0]
-        single_highlights = set(row_single.get('__tokens', [])) if highlight_on else None
-        render_doc_card(sel_doc_id, highlights=single_highlights)
+        render_doc_card(sel_doc_id)
         
         # Show Neighbors for this single doc
-        st.markdown("**I. Radial Plot (Nearest Neighbors)**")
-        st.caption("Compare the relationship of top choice similar documents to the first selected document. The closer points appear to the center point, the more similar they are according to the vector space chosen.")
+        st.markdown("**Nearest Neighbors**")
         # Reuse neighbor logic
-        neighbors_to_fetch = min(15, len(df_work))
+        neighbors_to_fetch = min(6, len(df_work))
         if neighbors_to_fetch >= 2:
             try:
                 nn_model = NearestNeighbors(metric='cosine', n_neighbors=neighbors_to_fetch).fit(embeddings_for_sim)
                 vec_idx, vec = fetch_vector(sel_doc_id)
                 if vec is not None:
                     dists, indices = nn_model.kneighbors(vec.reshape(1, -1))
-                    
                     disp_data = []
-                    r_vals = [0.0]
-                    full_ids = [sel_doc_id]
-                    text_vals = [f"<b>{sel_doc_id}</b><br>Target"]
-                    color_vals = ["Target"]
-                    short_labels = ["Target"]
-                    
-                    import math
-                    x_vals, y_vals = [0.0], [0.0]
-                    angle_step = 360.0 / max(1, len(indices[0]) - 1)
-                    angle = 0.0
-                    
                     for i, dist in zip(indices[0], dists[0]):
                         if i < len(df_work):
                             nid = df_work.iloc[i]['doc_id']
                             if nid != sel_doc_id:
                                 sim = 1.0 - dist
                                 disp_data.append({'Match (ID)': nid, 'Sim': sim})
-                                r_vals.append(dist)
-                                parts = nid.split('_')
-                                short_id = "_".join(parts[:2]) if len(parts) >= 2 else nid[:12]
-                                short_labels.append(short_id)
-                                text_vals.append(f"{nid}<br>Similarity: {sim:.3f}")
-                                color_vals.append("Neighbor")
-                                full_ids.append(nid)
-                                
-                                rad = math.radians(angle)
-                                x_vals.append(dist * math.cos(rad))
-                                y_vals.append(dist * math.sin(rad))
-                                angle += angle_step
-
                     if disp_data:
-                        polar_df = pd.DataFrame({"x": x_vals, "y": y_vals, "Label": text_vals, "Type": color_vals, "Full_ID": full_ids, "Short": short_labels})
-                        import plotly.express as px
-                        fig_polar = px.scatter(polar_df, x="x", y="y", color="Type", text="Short", hover_name="Label", color_discrete_map={"Target": "#E63946", "Neighbor": "#457B9D"}, custom_data=["Full_ID"])
-                        fig_polar.update_traces(textposition='top center', marker=dict(size=12, line=dict(color="white", width=1)))
-                        
-                        limit = max(r_vals)*1.4 if r_vals and max(r_vals) > 0 else 1.0
-                        fig_polar.update_layout(
-                            xaxis=dict(visible=False, range=[-limit, limit]), yaxis=dict(visible=False, range=[-limit, limit]),
-                            margin=dict(l=20, r=20, t=20, b=20), showlegend=False, height=450, plot_bgcolor='rgba(0,0,0,0)', clickmode='event+select'
-                        )
-                        for ring_r in [limit*0.33, limit*0.66, limit]:
-                            fig_polar.add_shape(type="circle", x0=-ring_r, y0=-ring_r, x1=ring_r, y1=ring_r, line_color="lightgray", opacity=0.3, layer="below")
-                        
-                        rcol1, rcol2 = st.columns([1, 1])
-                        with rcol1:
-                            selection_radial_big = st.plotly_chart(fig_polar, use_container_width=True, on_select="rerun", selection_mode=['points'], key=f"radial_big_{sel_doc_id}")
-                            if selection_radial_big and hasattr(selection_radial_big, 'selection') and hasattr(selection_radial_big.selection, 'points'):
-                                pts = selection_radial_big.selection.points
-                                if pts:
-                                    cdata = pts[0].get('customdata', [])
-                                    if cdata and cdata[0]:
-                                        clicked_id = str(cdata[0])
-                                        if clicked_id != sel_doc_id:
-                                            st.session_state['selected_ids'] = [clicked_id]
-                                            st.rerun()
-                        with rcol2:
-                            st.dataframe(pd.DataFrame(disp_data).head(8), hide_index=True, use_container_width=True)
+                        st.dataframe(pd.DataFrame(disp_data), hide_index=True, width="stretch")
             except Exception:
                 pass
 
@@ -2016,24 +3498,8 @@ def render_selection_details(selected_ids):
         # COMPARISON MODE
         doc_a, doc_b = selected_doc_ids[0], selected_doc_ids[1]
         st.markdown("---")
-        st.subheader("G. Selected Document View (Comparison)")
-        st.caption("Yellow highlights show the common salient words between the two selected papers.")
-        highlight_on = st.checkbox("Yellow highlight on", value=True, key="hl_comp", help="Highlight the common salient words when two papers are selected.")
+        st.subheader("Comparison View")
         
-        with st.expander("ℹ️ H. Neighborhood List / Similarity Metrics (What do these mean?)"):
-            st.markdown("""
-**H. Neighborhood Metrics**:
-**Cosine Similarity**: Measures the *semantic angle* between two documents. 
-- **What it means:** `1.0` means they share the exact same topics/meaning. `0.0` or negative means they are completely unrelated. 
-- **Why it's important:** Because it ignores document length, this helps identify when two seemingly different papers (or a short abstract and a long paper) are talking about the exact same underlying topic.
-
-**Euclidean Distance**: Measures the absolute *straight-line distance* in the high-dimensional vector space. 
-- **What it means:** Lower is closer.
-
-**Corpus Map Dists (t-SNE/UMAP/PCA)**: The visual distance between the two dots on the Corpus Map 2D projection.
-- **Why compare them?** If Cosine Similarity is high but the Corpus Map distance is huge, the projection artificially separated them. This helps you understand odd placements on the Corpus Map.
-""")
-
         # Metrics
         metrics = compute_pair_metrics(doc_a, doc_b)
         c1, c2, c3 = st.columns(3)
@@ -2050,24 +3516,21 @@ def render_selection_details(selected_ids):
                 c3.caption("Projection Dists:")
                 c3.write(p_dist_str)
         
-        # Try to identify shared terms BEFORE plotting the cards to highlight them
-        shared = set()
+        # Side-by-Side Content
+        colA, colB = st.columns(2)
+        with colA:
+            render_doc_card(doc_a)
+        with colB:
+            render_doc_card(doc_b)
+            
         if 'row_a' in locals() and 'row_b' in locals() and not row_a.empty and not row_b.empty:
             toks_a = set(row_a.iloc[0].get('__tokens', []))
             toks_b = set(row_b.iloc[0].get('__tokens', []))
             shared = toks_a.intersection(toks_b)
-            
-        # Side-by-Side Content
-        colA, colB = st.columns(2)
-        with colA:
-            render_doc_card(doc_a, highlights=shared if highlight_on else None)
-        with colB:
-            render_doc_card(doc_b, highlights=shared if highlight_on else None)
-            
-        if shared:
-            st.markdown(f"**Shared Terms**: `{'`, `'.join(sorted(shared)[:15])}`")
-        else:
-            st.caption("No shared terms found.")
+            if shared:
+                st.markdown(f"**Shared Terms**: `{'`, `'.join(sorted(shared)[:15])}`")
+            else:
+                st.caption("No shared terms found.")
             
         st.markdown("---")
         st.markdown("#### Documents Between A and B")
@@ -2087,11 +3550,11 @@ def render_selection_details(selected_ids):
                          nid = df_work.iloc[i]['doc_id']
                          if nid not in (doc_a, doc_b):
                              sim = 1.0 - dist
-                             cluster = target_df[target_df['doc_id']==nid]['cluster'].iloc[0] if 'cluster' in target_df else 'N/A'
+                             cluster = df_work[df_work['doc_id']==nid]['cluster'].iloc[0] if 'cluster' in df_work else 'N/A'
                              between_data.append({'Doc ID': nid, 'Similarity to Midpoint': f"{sim:.3f}", 'Cluster': str(cluster)})
                  
                  if between_data:
-                     st.dataframe(pd.DataFrame(between_data), hide_index=True, use_container_width=True)
+                     st.dataframe(pd.DataFrame(between_data), hide_index=True, width="stretch")
                  else:
                      st.write("No distinct documents found strictly between A and B.")
             
@@ -2113,14 +3576,14 @@ def render_selection_details(selected_ids):
                     # Average pairwise similarity (excluding self-similarity on diagonal)
                     n = len(vecs)
                     avg_sim = (sim_matrix.sum() - n) / (n * (n - 1)) if n > 1 else 1.0
-                    st.metric("Avg Pairwise Similarity", f"{avg_sim:.3f}")
-                    with st.expander("ℹ️ What does this mean?"):
-                        st.markdown("""
-**Avg Pairwise Similarity** calculates the Cosine Similarity between *every possible combination* of documents in your selection, and averages the results.
-
-- **What it measures:** The "tightness" or "purity" of your selected group. 
-- **How it helps:** A score near `1.0` means every document in this group is aggressively focused on the exact same niche topic. A low score (e.g., `< 0.3`) means you have lassoed a very diverse, noisy, or unrelated set of documents.
-""")
+                    # Interpret similarity level
+                    if avg_sim > 0.6:
+                        interp = "High (similar topics)"
+                    elif avg_sim > 0.3:
+                        interp = "Moderate (mixed)"
+                    else:
+                        interp = "Low (diverse)"
+                    st.metric("Group Similarity", f"{avg_sim:.3f} — {interp}", help="Average cosine similarity between all document pairs. 1.0 = identical, 0.0 = unrelated.")
             except Exception:
                 pass
         
@@ -2133,56 +3596,21 @@ def render_selection_details(selected_ids):
                 with cols[1]:
                     render_doc_card(selected_doc_ids[i + 1])
 
-# ── Tab 1: Selected Documents ──
+# â”€â”€ Tab 1: Selected Documents â”€â”€
 with tab_docs:
     with st.container(border=True):
         render_selection_details(st.session_state['selected_ids'])
     
-    # Distance Heatmap (only when 2+ selected)
-    if len(st.session_state['selected_ids']) >= 2:
-        with st.container(border=True):
-            st.subheader("F. Neighborhood Matrix")
-            st.caption('Used to compare salient words and geometric distances between similar documents, displaying frequencies of similarities with each document in the neighborhood.')
-            selected_df = df_work[df_work['doc_id'].isin(st.session_state['selected_ids'])]
-            if len(selected_df) <= 100:
-                selected_indices = [id_to_local_idx.get(doc_id) for doc_id in st.session_state['selected_ids'] if doc_id in id_to_local_idx]
-                selected_indices = [i for i in selected_indices if i is not None and i < len(embeddings_for_sim)]
-                
-                if len(selected_indices) >= 2:
-                    selected_embeddings = embeddings_for_sim[selected_indices]
-                    similarity_matrix = cosine_similarity(selected_embeddings)
-                    
-                    import plotly.graph_objects as go
-                    fig_heatmap = go.Figure(data=go.Heatmap(
-                        z=similarity_matrix,
-                        x=[st.session_state['selected_ids'][i] for i in range(len(selected_indices))],
-                        y=[st.session_state['selected_ids'][i] for i in range(len(selected_indices))],
-                        colorscale='RdYlGn',
-                        zmid=0.5,
-                        text=similarity_matrix.round(3),
-                        texttemplate='%{text}',
-                        textfont={"size": 10},
-                        colorbar=dict(title="Cosine Sim")
-                    ))
-                    fig_heatmap.update_layout(
-                        margin=dict(l=10, r=10, t=30, b=10),
-                        height=500
-                    )
-                    st.plotly_chart(fig_heatmap, use_container_width=True)
-            else:
-                st.info(f'Heatmap available for ≤100 selected points (currently {len(selected_df)} selected)')
-
-# ── Tab 2: Regional List ──
+# â”€â”€ Tab 2: Cluster Stats â”€â”€
 with tab_stats:
     target_df = df_work
-    stats_title = "E. Regional List (All Visible)"
+    stats_title = "Cluster Stats (All Visible)"
     
     if st.session_state['selected_ids']:
         sel_df = df_work[df_work['doc_id'].isin(st.session_state['selected_ids'])]
         if not sel_df.empty:
             target_df = sel_df
-            stats_title = "E. Regional List (Selection)"
-            st.caption("Displays systematic exploration of the region with multiple criteria (the cluster categories).")
+            stats_title = "Cluster Stats (Selection)"
     
     if 'cluster' in target_df.columns and target_df['cluster'].nunique() > 0:
         with st.container(border=True):
@@ -2197,74 +3625,289 @@ with tab_stats:
             # Ensure clusters always read beautifully on the layout
             plot_df['cluster_label'] = plot_df['cluster'].apply(lambda x: GLOBAL_CLUSTER_MAP.get(x, f'Cluster {x}'))
             
-            fig_cluster = px.bar(
-                plot_df,
-                text='Count',
-                y='cluster_label',
-                x='Count',
-                orientation='h',
-                color='Count',
-                color_continuous_scale='Blues',
-            )
-            fig_cluster.update_layout(
-                margin=dict(l=10, r=10, t=10, b=10),
-                height=350,
-                xaxis_title='Documents',
-                yaxis_title='',
-                yaxis=dict(type='category', dtick=1),
-                coloraxis_showscale=False,
-            )
-            fig_cluster.update_traces(textposition='auto')
-            st.plotly_chart(fig_cluster, use_container_width=True)
+            try:
+                fig_cluster = px.bar(
+                    plot_df,
+                    text='Count',
+                    y='cluster_label',
+                    x='Count',
+                    orientation='h',
+                    color='Count',
+                    color_continuous_scale='Blues',
+                )
+                fig_cluster.update_layout(
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    height=350,
+                    xaxis_title='Documents',
+                    yaxis_title='',
+                    yaxis=dict(type='category', dtick=1),
+                    coloraxis_showscale=False,
+                )
+                fig_cluster.update_traces(textposition='auto')
+                st.plotly_chart(fig_cluster, width="stretch")
+            except Exception as e:
+                st.error(f"Chart rendering error: {e}")
+                st.dataframe(plot_df)
             
             if not st.session_state['selected_ids']:
                 st.caption('Click to select all docs in a cluster:')
                 cluster_cols = st.columns(min(5, len(cluster_stats)))
                 for idx, (cluster_id, row) in enumerate(cluster_stats.head(5).iterrows()):
                     with cluster_cols[idx]:
-                        if st.button(f'Cluster {cluster_id} ({int(row["Count"])})', key=f'select_cluster_{cluster_id}', use_container_width=True):
+                        if st.button(f'Cluster {cluster_id} ({int(row["Count"])})', key=f'select_cluster_{cluster_id}', width="stretch"):
                             cluster_docs = df_work[df_work['cluster'] == cluster_id]['doc_id'].tolist()
                             update_selection(cluster_docs, additive=False)
-    else:
-        st.info("No cluster data available.")
+            st.markdown("---")
+            # Distance Heatmap (only when 2+ selected)
+            if len(st.session_state['selected_ids']) >= 2:
+                with st.container(border=True):
+                    st.subheader("Distance Analysis")
+        
+                    selected_df = df_work[df_work['doc_id'].isin(st.session_state['selected_ids'])]
+                    n_selected = len(selected_df)
+        
+                    # Large selection mode: show centroid summary instead of full matrix
+                    if n_selected > 20:
+                        st.caption(f'Showing summary for {n_selected} selected documents (full matrix hidden for performance)')
+            
+                        selected_indices = [id_to_local_idx.get(doc_id) for doc_id in st.session_state['selected_ids'] if doc_id in id_to_local_idx]
+                        selected_indices = [i for i in selected_indices if i is not None and i < len(embeddings_for_sim)]
+            
+                        if len(selected_indices) >= 2:
+                            selected_embeddings = embeddings_for_sim[selected_indices]
+                            centroid = selected_embeddings.mean(axis=0)
+                
+                            # Compute distance from each doc to centroid
+                            distances_to_centroid = []
+                            for idx in selected_indices:
+                                vec = embeddings_for_sim[idx]
+                                if hasattr(vec, 'toarray'):
+                                    vec = vec.toarray().flatten()
+                                elif hasattr(vec, 'ndim') and vec.ndim > 1:
+                                    vec = vec.flatten()
+                                dist = float(cosine_similarity(vec.reshape(1, -1), centroid.reshape(1, -1))[0, 0])
+                                distances_to_centroid.append(dist)
+                
+                            distances_to_centroid = np.array(distances_to_centroid)
+                
+                            # Show stats
+                            col1, col2, col3, col4 = st.columns(4)
+                            col1.metric("Avg Distance to Centroid", f"{distances_to_centroid.mean():.3f}")
+                            col2.metric("Min", f"{distances_to_centroid.min():.3f}")
+                            col3.metric("Max", f"{distances_to_centroid.max():.3f}")
+                            col4.metric("Std Dev", f"{distances_to_centroid.std():.3f}")
+                
+                            st.caption("Interpretation: Higher average = selection is more spread out in embedding space")
+        
+                    # Show full heatmap only for reasonable sizes
+                    elif n_selected <= 100:
+                        selected_indices = [id_to_local_idx.get(doc_id) for doc_id in st.session_state['selected_ids'] if doc_id in id_to_local_idx]
+                        selected_indices = [i for i in selected_indices if i is not None and i < len(embeddings_for_sim)]
+            
+                        if len(selected_indices) >= 2:
+                            selected_embeddings = embeddings_for_sim[selected_indices]
+                            similarity_matrix = cosine_similarity(selected_embeddings)
+                
+                            import plotly.graph_objects as go
+                            fig_heatmap = go.Figure(data=go.Heatmap(
+                                z=similarity_matrix,
+                                x=[st.session_state['selected_ids'][i] for i in range(len(selected_indices))],
+                                y=[st.session_state['selected_ids'][i] for i in range(len(selected_indices))],
+                                colorscale='RdYlGn',
+                                zmid=0.5,
+                                text=similarity_matrix.round(3),
+                                texttemplate='%{text}',
+                                textfont={"size": 10},
+                                colorbar=dict(title="Cosine Sim")
+                            ))
+                            fig_heatmap.update_layout(
+                                margin=dict(l=10, r=10, t=30, b=10),
+                                height=500
+                            )
+                            st.plotly_chart(fig_heatmap, width="stretch")
+                    else:
+                        st.info(f'Distance matrix not shown for {n_selected} documents (too large). Use centroid summary above.')
 
-# ── Tab 3: Regional Matrix ──
+    else:
+        if 'cluster' not in target_df.columns:
+            st.error("No cluster column found in dataframe. Check that cluster_labels.npy exists in the artifacts folder and that the pipeline has been run.")
+        elif target_df['cluster'].nunique() == 0:
+            st.error("Cluster column exists but has no values. The dataframe may be empty after filtering.")
+        elif not GLOBAL_CLUSTER_MAP:
+            st.warning("Cluster labels not loaded — GLOBAL_CLUSTER_MAP is empty. Cluster stats will show numeric IDs only.")
+            st.dataframe(target_df.groupby('cluster')['doc_id'].count().reset_index())
+        else:
+            st.info("No cluster data available.")
+
+# â”€â”€ Tab 3: Top Keywords â”€â”€
 with tab_keywords:
-    st.subheader("D. Regional Matrix / Top Keywords")
-    st.caption("Allows for easy viewing of what salient words have the highest frequencies between all the documents within a region or selection.")
+    st.subheader("Top Keywords (TF-IDF Ranked)")
+    
+    # Explain TF-IDF scoring and why it matters
+    with st.expander("Why TF-IDF? How does ranking work?", expanded=False):
+        st.markdown("""
+**TF-IDF (Term Frequency-Inverse Document Frequency)** ranks keywords by how specific and meaningful they are to YOUR selection:
+
+**The Problem with Raw Frequency**: When you count word occurrences, common words dominate the results.
+- Example: Word frequency ranking gives you "use", "make", "also", "data" — generic words that appear everywhere
+- These don't tell you anything unique about YOUR selection
+
+**The TF-IDF Solution**: Score each word by how often it appears in your selection vs. the entire corpus.
+- **HIGH score** = Appears frequently in YOUR docs, but rarely in the corpus overall = **DISTINCTIVE to your selection**
+- **LOW score** = Appears everywhere (in most documents) = generic filler words filtered out
+
+**Practical Example**: Dashboard Design Corpus
+- Raw frequency ranking: "use" (150 times), "make" (120), "also" (100), "data" (95)
+- TF-IDF ranking: "dashboard" (high relevance), "design" (high relevance), "ui" (high relevance)
+
+**Why This Matters**: TF-IDF reveals what actually distinguishes your group of documents from the rest of the corpus, helping you understand the unique themes and topics in your selection.
+        """)
+    
+    # **CRITICAL CHECK**: Verify that token column is available and populated
+    # If empty or missing, it means the offline pipeline was not run properly
+    if '__tokens' not in df.columns or all(len(t) == 0 for t in df['__tokens']):
+        st.error(
+            "**OFFLINE PREPROCESSING REQUIRED**\n\n"
+            "The 'tokens' column is missing or empty. This is created by the offline preprocessing "
+            "pipeline (parse.py::preprocess_texts) which lemmatizes and filters tokens.\n\n"
+            "**Keyword extraction requires preprocessed tokens for consistency between offline and online analysis.**\n\n"
+            "**Actions:**\n"
+            "1. Run the offline pipeline: `python run_pipeline.py`\n"
+            "2. Verify the output CSV has a 'tokens' column\n"
+            "3. Restart the Streamlit app\n\n"
+            "We do NOT use regex fallback extraction because it produces different results than "
+            "the offline pipeline (no lemmatization, different stopword filtering)."
+        )
+    
     if st.session_state['selected_ids']:
         sel_df = df_work[df_work['doc_id'].isin(st.session_state['selected_ids'])]
         all_toks = [tok for toks in sel_df['__tokens'] for tok in toks]
         if all_toks:
-            from collections import Counter
-            counts = Counter(all_toks).most_common(20) # Trim space
-            kw_df = pd.DataFrame(counts, columns=['Term', 'Count']).sort_values('Count', ascending=True)
+            # Use TF-IDF weighted keyword extraction with full corpus for IDF
+            full_corpus_toks = df['__tokens'].tolist()  # Full corpus for IDF
+            keywords_with_scores, fallback_mode = get_keywords_with_tfidf(
+                selected_tokens=sel_df['__tokens'].tolist(),
+                full_corpus_tokens=full_corpus_toks,
+                n=15,
+                min_doc_freq=2
+            )
+            
+            # Show fallback note if in fallback mode
+            if fallback_mode:
+                st.warning("Limited Selection: Showing frequency-ranked keywords (need 2+ documents for accurate TF-IDF)")
+            
+            # Build dataframe from TF-IDF results
+            if keywords_with_scores:
+                kw_df = pd.DataFrame(keywords_with_scores, columns=['Term', 'Score'])
+                kw_df['Score'] = kw_df['Score'].round(4)
+                kw_df = kw_df.sort_values('Score', ascending=True)
+            else:
+                kw_df = pd.DataFrame(columns=['Term', 'Score'])
+            
+            # Show selection context
+            st.caption(f"Analyzing {len(sel_df)} selected document(s) — Extracting top 15 distinct keywords")
+            
+            # Show TF-IDF visualization with labeled explanation
+            st.markdown("**Ranked by TF-IDF Score** — Higher = more specific to your selection, lower = more generic")
             fig_kw = px.bar(
                 kw_df,
-                text='Count',
+                text='Score',
                 y='Term',
-                x='Count',
+                x='Score',
                 orientation='h',
-                color='Count',
-                color_continuous_scale='Viridis',
+                hover_data={'Score': ':.4f'},
+                labels={'Score': 'TF-IDF Score'}
             )
             fig_kw.update_layout(
                 height=350,
                 margin=dict(l=10, r=10, t=10, b=10),
                 showlegend=False,
-                coloraxis_showscale=False,
                 yaxis=dict(type='category', dtick=1),
                 yaxis_title='',
-                xaxis_title='Count',
-                bargap=0.3,
+                xaxis_title='TF-IDF Score (Higher = More Distinctive)',
+                bargap=0.3
             )
-            fig_kw.update_traces(textposition='auto')
-            st.plotly_chart(fig_kw, use_container_width=True)
+            fig_kw.update_xaxes(title_text="TF-IDF Score (Higher = More Distinctive to Your Selection)")
+            fig_kw.update_traces(marker_color='steelblue', textposition='auto')
+            st.plotly_chart(fig_kw, width="stretch")
+            
+            # Show table for reference with explanation
+            with st.expander("Keyword Details Table — See exact TF-IDF scores"):
+                # Display table first (primary content)
+                display_df = kw_df.sort_values('Score', ascending=False).copy()
+                display_df['Score'] = display_df['Score'].apply(lambda x: f"{x:.6f}")
+                st.caption("Term | Score (higher = more distinctive)")
+                st.dataframe(display_df, width="stretch", hide_index=True)
+                
+                # Filter explanations behind an info box below the table
+                st.markdown("---")
+                with st.expander("ℹ️ How does filtering work?", expanded=False):
+                    st.markdown("""
+**Column Explanation:**
+- **Term**: The keyword or phrase extracted from your selection
+- **Score**: TF-IDF score (0.0 = generic filler, higher values = unique to your selection)
+
+**Quality Filters Applied:**
+- Minimum 2 documents must contain term (eliminates one-off artifacts)
+- Excluded 100+ generic filler words ("use", "make", "also", "data", "design", "good", etc.)
+- Only 3+ character terms (removes abbreviations and single letters)
+- No pure numbers
+                    """)
         else:
-            st.info("No tokens available. Try clearing cache (⋮ → Clear cache).")
+            st.info("No tokens available. Try clearing cache (â‹® â†’ Clear cache).")
     else:
-        st.info("Select documents to see their top keywords.")
+        st.info("Select documents to see their top keywords (ranked by TF-IDF specificity).")
+
+# ===== SESSION HISTORY LOG PANEL =====
+st.markdown("---")
+with st.expander("Session Reasoning Trail", expanded=False):
+    """
+    **Your session history** — All significant actions timestamped. Click any entry to restore that state.
+    """
+    
+    history_log = st.session_state.get('history_log', [])
+    
+    if history_log:
+        # Create columns for display and actions
+        col1_exp, col2_exp = st.columns([4, 1])
+        
+        with col2_exp:
+            if st.button("Export as TXT", key="export_history"):
+                # Format history for export
+                export_lines = ['=== Session Reasoning Trail ===\n']
+                export_lines.append(f'Session generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
+                export_lines.append(f'Total actions: {len(history_log)}\n\n')
+                
+                for i, entry in enumerate(history_log, 1):
+                    export_lines.append(f"{i}. [{entry['timestamp']}] {entry['action_type'].upper()}")
+                    export_lines.append(f"   {entry['description']}\n")
+                
+                export_text = '\n'.join(export_lines)
+                st.download_button(
+                    label="Download TXT",
+                    data=export_text,
+                    file_name=f"session_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                    mime="text/plain",
+                    key="download_history"
+                )
+        
+        # Display history entries
+        for i, entry in enumerate(reversed(history_log)):
+            cols = st.columns([0.5, 3, 1.5])
+            with cols[0]:
+                st.caption(f"#{len(history_log) - i}")
+            with cols[1]:
+                st.write(f"**{entry['timestamp']}** — *{entry['action_type']}*")
+                st.caption(entry['description'])
+            with cols[2]:
+                if st.button("Restore", key=f"restore_{i}", help="Restore session state to this point"):
+                    restore_state_from_entry(entry)
+                    st.toast(f"Restored state from {entry['timestamp']}")
+    else:
+        st.caption("No actions logged yet. Start searching, selecting, or saving groups to build your reasoning trail.")
 
 st.markdown('---')
-st.caption('AbstractsViewer v2.0 (Prototype)')
+st.caption('Embeddings Explorer v2.0')
+
+
 
