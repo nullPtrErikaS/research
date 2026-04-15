@@ -2463,12 +2463,11 @@ if _table_state is not None:
                     focused_ids.append(_sel_df.iloc[_ri]['doc_id'])
     except Exception:
         pass
-st.session_state['focused_ids'] = focused_ids
-
 # Merge pinned docs into focused_ids so they stay highlighted across all selections
 _pinned = st.session_state.get('pinned_doc_ids', [])
 if _pinned:
     focused_ids = list(set(focused_ids) | set(_pinned))
+st.session_state['focused_ids'] = focused_ids
 
 # Centralized Selection Logic: Process chart events before rendering new plots
 # This ensures that a selection in any chart updates all charts immediately (fixing directional bugs).
