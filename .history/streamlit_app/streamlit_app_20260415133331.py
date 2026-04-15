@@ -1009,15 +1009,15 @@ _debug_loaded = []
 if coords_tsne is not None:
     _debug_loaded.append(f"[OK] t-SNE ({coords_tsne.shape})")
 elif coords_tsne_path:
-    _debug_loaded.append(f"[ERROR] t-SNE failed: {coords_tsne_path}")
+    _debug_loaded.append(f"⚠️ t-SNE failed: {coords_tsne_path}")
 if coords_umap is not None:
     _debug_loaded.append(f"[OK] UMAP ({coords_umap.shape})")
 elif coords_umap_path:
-    _debug_loaded.append(f"[ERROR] UMAP failed: {coords_umap_path}")
+    _debug_loaded.append(f"⚠️ UMAP failed: {coords_umap_path}")
 if coords_base is not None:
     _debug_loaded.append(f"[OK] PCA ({coords_base.shape})")
 elif coords_pca_path:
-    _debug_loaded.append(f"[ERROR] PCA failed: {coords_pca_path}")
+    _debug_loaded.append(f"⚠️ PCA failed: {coords_pca_path}")
 if _debug_loaded:
     with st.expander("Coordinate Loading Status", expanded=False):
         st.code("\n".join(_debug_loaded))
@@ -2012,7 +2012,7 @@ with st.sidebar:
                 col1, col2, col3 = st.columns([2, 1, 1])
                 
                 with col1:
-                    st.caption(f"[Snapshot] {snap_name}")
+                    st.caption(f"📦 {snap_name}")
                     ts = snap_data.get('timestamp', '')
                     if ts:
                         st.caption(f"_{ts.split('T')[0]}_")

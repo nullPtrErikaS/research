@@ -1,4 +1,4 @@
-import ast
+﻿import ast
 import os
 import textwrap
 
@@ -71,7 +71,6 @@ alignment_notes = []
 
 @st.cache_data
 def try_load(path, mtime=None):
-    """Load array/matrix/CSV with proper error handling. Uses mtime for cache invalidation."""
     try:
         if path.endswith('.npy'):
             return np.load(path)
@@ -79,13 +78,7 @@ def try_load(path, mtime=None):
              return scipy.sparse.load_npz(path)
         else:
             return pd.read_csv(path)
-    except FileNotFoundError as e:
-        import sys
-        print(f"[try_load] File not found: {path}", file=sys.stderr)
-        return None
-    except Exception as e:
-        import sys
-        print(f"[try_load] Failed to load {path}: {type(e).__name__}: {e}", file=sys.stderr)
+    except Exception:
         return None
 
 
@@ -263,7 +256,7 @@ def parse_keyword_space(df):
             break
     if token_col is None:
         return [], []
-    token_lists = df[token_col].apply(lambda vals: tuple([str(tok).lower() for tok in ensure_list(vals)]))
+    token_lists = df[token_col].apply(lambda vals: [str(tok).lower() for tok in ensure_list(vals)])
     df['__tokens'] = token_lists
     flattened = [tok for toks in token_lists for tok in toks if isinstance(tok, str)]
     keyword_counts = pd.Series(flattened).value_counts()
@@ -848,7 +841,7 @@ def load_and_process_data(csv_path, doc_ids_path_arg, _variant_key="default", _v
             stacklevel=3
         )
         # Initialize empty tokens to prevent app crash
-        df_local['__tokens'] = df_local.apply(lambda row: tuple(), axis=1)
+        df_local['__tokens'] = df_local.apply(lambda row: [], axis=1)
         av_kw = []
         
     return df_local, tok_col, av_kw
@@ -866,17 +859,6 @@ tfidf_matrix_path = coord_paths['tfidf']
 cluster_labels_path = coord_paths['cluster_labels']
 doc_ids_path = coord_paths['doc_ids']
 
-# Debug: Show which coordinate files were found
-if variant_key != "default" or True:  # Always show for now
-    _debug_paths = []
-    for key, path in coord_paths.items():
-        status = "OK" if path and os.path.exists(path) else "NOT FOUND"
-        _debug_paths.append(f"{status} {key:15} {path or '(not found)'}")
-    
-    with st.expander("Coordinate File Paths (from load_coordinate_files)", expanded=False):
-        st.code("\n".join(_debug_paths), language="plaintext")
-
-@st.cache_data
 def extract_cluster_topics(df_for_topics):
     """
     Extract cluster labels using inter-cluster TF-IDF.
@@ -1004,24 +986,6 @@ coords_umap = try_load(coords_umap_path, get_mtime(coords_umap_path)) if coords_
 coords_base = try_load(coords_pca_path, get_mtime(coords_pca_path)) if coords_pca_path else None
 tfidf_matrix = try_load(tfidf_matrix_path, get_mtime(tfidf_matrix_path)) if tfidf_matrix_path else None
 
-# Debug: diagnose coordinate loading
-_debug_loaded = []
-if coords_tsne is not None:
-    _debug_loaded.append(f"[OK] t-SNE ({coords_tsne.shape})")
-elif coords_tsne_path:
-    _debug_loaded.append(f"[ERROR] t-SNE failed: {coords_tsne_path}")
-if coords_umap is not None:
-    _debug_loaded.append(f"[OK] UMAP ({coords_umap.shape})")
-elif coords_umap_path:
-    _debug_loaded.append(f"[ERROR] UMAP failed: {coords_umap_path}")
-if coords_base is not None:
-    _debug_loaded.append(f"[OK] PCA ({coords_base.shape})")
-elif coords_pca_path:
-    _debug_loaded.append(f"[ERROR] PCA failed: {coords_pca_path}")
-if _debug_loaded:
-    with st.expander("Coordinate Loading Status", expanded=False):
-        st.code("\n".join(_debug_loaded))
-
 @st.cache_data
 def load_doc_ids_and_index(path, _df):
     """Load doc_ids from file and build the doc_id to index mapping."""
@@ -1115,20 +1079,9 @@ else:
     base_embeddings = coords_base
     st.warning("Using low-dimensional 2D layout for similarity. Results may be inaccurate.")
 
-@st.cache_data
-def _compute_pca_fallback_tsne(base_emb_shape):
-    """Cache PCA fallback to avoid recomputing on every rerun. Takes shape not data (for hashability)."""
-    st.warning("⏳ t-SNE file unavailable - computing PCA fallback (500-1000ms penalty on every rerun!)")
-    # Note: We can't cache the result because it depends on base_embeddings which changes with filters
-    # This warning tells the user to run run_pipeline.py to pre-compute t-SNE
-    return None  # Placeholder - actual computation done inline
-
 if coords_tsne is None:
-    st.warning("⏳ **t-SNE unavailable** - Computing with PCA fallback (500-1000ms penalty on every rerun)")
-    st.info("**Fix**: Run `python run_pipeline.py` to pre-compute t-SNE coordinates and avoid this delay")
     coords_tsne = PCA(n_components=2).fit_transform(base_embeddings)
 if coords_umap is None:
-    # UMAP is optional, don't warn about it
     coords_umap = PCA(n_components=2).fit_transform(base_embeddings + 0.01)
 
 # Compute global embedding health metric (cached)
@@ -1741,7 +1694,7 @@ with st.sidebar:
             df['cluster'] = st.session_state['dynamic_clusters']
     
     # Cluster Keywords Quality Note
-    with st.expander("About Cluster Keywords", expanded=False):
+    with st.expander("ℹ️ About Cluster Keywords", expanded=False):
         st.markdown("""
 **Cluster keywords are computed at runtime using Inter-Cluster TF-IDF**, which ranks terms by how distinctive they are to each cluster:
 
@@ -1751,7 +1704,7 @@ with st.sidebar:
 
 **Why this is better than offline frequency counting:**
 - Keywords reflect what makes each cluster **different** (not just common globally)
-- Quality automatically improves when data/preprocessing changes
+- 🔄 Quality automatically improves when data/preprocessing changes
 - Computed at load time (~5ms per cluster)
 - Consistent with preprocessed tokens from the offline pipeline
 
@@ -1836,7 +1789,7 @@ with st.sidebar:
         
         # Show differences from default if not default
         if variant_info["differences"]:
-            with st.expander("Differences from Default"):
+            with st.expander("🔄 Differences from Default"):
                 for diff in variant_info["differences"]:
                     st.write(f"• {diff}")
         
@@ -1867,7 +1820,8 @@ with st.sidebar:
             st.info(
                 "**Cluster Keywords** are computed at runtime using Inter-Cluster TF-IDF, which ranks terms by how distinctive they are to each cluster. "
                 "This is more accurate than offline frequency-based extraction. "
-                "Expand 'Clustering Settings' → 'About Cluster Keywords' for details."
+                "Expand 'Clustering Settings' → 'About Cluster Keywords' for details.",
+                icon="ℹ️"
             )
         
         st.markdown('**Visual Tweaks**')
@@ -2012,7 +1966,7 @@ with st.sidebar:
                 col1, col2, col3 = st.columns([2, 1, 1])
                 
                 with col1:
-                    st.caption(f"[Snapshot] {snap_name}")
+                    st.caption(f"📦 {snap_name}")
                     ts = snap_data.get('timestamp', '')
                     if ts:
                         st.caption(f"_{ts.split('T')[0]}_")
@@ -2079,7 +2033,7 @@ with st.sidebar:
         # Temporal Analysis Guidance
         if 'Year' in numeric_metadata:
             st.caption(
-                "Tip: Switch color to **Year** (Display Mode) to see corpus evolution. Use the Year range slider to filter time windows and watch topics shift across the projection."
+                "ℹ️ Tip: Switch color to **Year** (Display Mode) to see corpus evolution. Use the Year range slider to filter time windows and watch topics shift across the projection."
             )
         
         max_points = st.slider('Max points to display', min_value=50, max_value=3000, value=1200, step=50, help="Reduce this number if the app feels slow. Limits how many dots are drawn.")
@@ -2845,7 +2799,7 @@ with status_placeholder.container():
                     delta=None
                 )
             with hc_help:
-                with st.popover("Info", use_container_width=False):
+                with st.popover("ℹ️", use_container_width=False):
                     st.markdown(f"""
 **Score: {health_pct:.1f}%**
 
@@ -2853,7 +2807,7 @@ Measures semantic coherence in the 2D projection.
 
 **How computed:**
 - 5-nearest neighbors for each doc in 2D space
-- TF-IDF cosine similarity between doc and neighbors
+- Jaccard similarity of keywords between doc and neighbors
 - Average across all docs (0-100%)
 
 **Thresholds:**
@@ -2922,17 +2876,17 @@ with tab_explore:
             st.markdown(f"""
 **Embedding Quality Score: {embedding_health_score:.1%}**
 
-Measures semantic coherence of the projection by checking if nearby documents in 2D space are actually semantically related.
+Measures semantic coherence of the projection by checking if nearby documents in 2D space have similar keywords.
 
 **How it works:**
 - Finds 5 nearest neighbors for each document in the 2D projection
-- Computes TF-IDF cosine similarity between each document and its neighbors (captures semantic meaning, not just keywords)
+- Computes keyword overlap (Jaccard similarity) between each document and its neighbors
 - Averages across all documents (0-1 scale, higher = better coherence)
 
 **What the score means:**
-- **≥50%** Good: Nearby docs are semantically related → projection is trustworthy
+- **≥50%** Good: Nearby docs consistently share keywords → projection is trustworthy
 - **30-50%** Fair: Some nearby docs are unrelated → use caution when interpreting spatial proximity
-- **<30%** Poor: Nearby docs are semantically distant → projection may be misleading
+- **<30%** Poor: Scattered topics in local neighborhoods → projection may be misleading
 
 **Why it matters:**
 Visual distance in the plot is supposed to represent semantic similarity. If embedding quality is poor:
@@ -3916,7 +3870,7 @@ with tab_keywords:
                 
                 # Filter explanations behind an info box below the table
                 st.markdown("---")
-                with st.expander("How does filtering work?", expanded=False):
+                with st.expander("ℹ️ How does filtering work?", expanded=False):
                     st.markdown("""
 **Column Explanation:**
 - **Term**: The keyword or phrase extracted from your selection

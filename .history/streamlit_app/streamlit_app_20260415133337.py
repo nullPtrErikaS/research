@@ -2012,7 +2012,7 @@ with st.sidebar:
                 col1, col2, col3 = st.columns([2, 1, 1])
                 
                 with col1:
-                    st.caption(f"[Snapshot] {snap_name}")
+                    st.caption(f"📦 {snap_name}")
                     ts = snap_data.get('timestamp', '')
                     if ts:
                         st.caption(f"_{ts.split('T')[0]}_")
