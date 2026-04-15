@@ -1120,8 +1120,21 @@ def make_plot(df_plot, xcol, ycol, selected_ids, search_ids, title, hover_cols, 
                 custom_data=['doc_id'],
             )
             
-            # Update color bar label
-            fig.update_coloraxes(colorbar_title="Year")
+            # Update color bar to show integer year tick values
+            year_min = int(df_plot['__year'].min())
+            year_max = int(df_plot['__year'].max())
+            year_range = year_max - year_min
+            # Pick ~5 evenly-spaced integer ticks across the actual range
+            tick_step = max(1, round(year_range / 5))
+            tick_vals = list(range(year_min, year_max + 1, tick_step))
+            if year_max not in tick_vals:
+                tick_vals.append(year_max)
+            fig.update_coloraxes(
+                colorbar_title="Year",
+                colorbar_tickvals=tick_vals,
+                colorbar_ticktext=[str(y) for y in tick_vals],
+                colorbar_tickmode='array',
+            )
             
             # Apply selection/search highlighting on top
             if selected_ids or search_ids or focused_ids:
@@ -1490,6 +1503,12 @@ if 'visible_doc_ids' not in st.session_state:
     st.session_state['visible_doc_ids'] = df['doc_id'].astype(str).tolist()
 if 'orient_me_dismissed' not in st.session_state:
     st.session_state['orient_me_dismissed'] = False
+if 'saved_cohort_notes' not in st.session_state:
+    st.session_state['saved_cohort_notes'] = {}  # {group_name: note_text}
+if 'cohort_rename_active' not in st.session_state:
+    st.session_state['cohort_rename_active'] = None  # name of group currently being renamed
+if 'pinned_doc_ids' not in st.session_state:
+    st.session_state['pinned_doc_ids'] = []  # docs always shown highlighted
 
 # ===== SESSION HISTORY TRACKING =====
 if 'history_log' not in st.session_state:
@@ -1529,19 +1548,28 @@ def create_state_snapshot():
         'search_hits': st.session_state.get('search_hits', []),
         'search_query_persist': st.session_state.get('search_query_persist', ''),
         'visible_doc_ids': st.session_state.get('visible_doc_ids', []),
+        'saved_cohorts': {k: list(v) for k, v in st.session_state.get('saved_cohorts', {}).items()},
+        'saved_cohort_notes': dict(st.session_state.get('saved_cohort_notes', {})),
+        'pinned_doc_ids': list(st.session_state.get('pinned_doc_ids', [])),
     }
 
 def restore_state_from_entry(entry):
     """Restore session state from a history log entry."""
     if not entry.get('state_snapshot'):
         return
-    
+
     snapshot = entry['state_snapshot']
     st.session_state['selected_ids'] = snapshot.get('selected_ids', [])
     st.session_state['search_hits'] = snapshot.get('search_hits', [])
     st.session_state['search_query_persist'] = snapshot.get('search_query_persist', '')
     st.session_state['visible_doc_ids'] = snapshot.get('visible_doc_ids', [])
     st.session_state['search_query'] = snapshot.get('search_query_persist', '')
+    if 'saved_cohorts' in snapshot:
+        st.session_state['saved_cohorts'] = snapshot['saved_cohorts']
+    if 'saved_cohort_notes' in snapshot:
+        st.session_state['saved_cohort_notes'] = snapshot['saved_cohort_notes']
+    if 'pinned_doc_ids' in snapshot:
+        st.session_state['pinned_doc_ids'] = snapshot['pinned_doc_ids']
     st.rerun()
 
 # ===== PIPELINE CONFIGURATION & METRICS =====
@@ -1740,7 +1768,12 @@ with st.sidebar:
                 if v == st.session_state.get('selected_bundle_root'):
                     current_label = k
                     break
-        chosen_label = st.selectbox('Choose artifact bundle', options=bundle_options, index=bundle_options.index(current_label) if current_label in bundle_options else 0)
+        chosen_label = st.selectbox(
+            'Choose artifact bundle', options=bundle_options,
+            index=bundle_options.index(current_label) if current_label in bundle_options else 0,
+            help='Switch between different preprocessing variants (e.g., default, no-stopwords). '
+                 'Each bundle is a separate run of the pipeline with different settings.'
+        )
         new_root = bundle_map.get(chosen_label)
         if new_root != st.session_state.get('selected_bundle_root'):
             st.session_state['selected_bundle_root'] = new_root
@@ -1758,11 +1791,13 @@ with st.sidebar:
         with variant_col2:
             st.write(f"_{current_variant['settings']}_")
         
-        # Show differences from default if not default
-        if variant_info["differences"]:
-            with st.expander("🔄 Differences from Default"):
+        # Always show the diff expander; collapsed by default
+        with st.expander("Differences from Default", expanded=False):
+            if variant_info["differences"]:
                 for diff in variant_info["differences"]:
                     st.write(f"• {diff}")
+            else:
+                st.caption("No differences — this variant matches the default settings.")
         
         if alignment_issues:
             st.warning('Data alignment issues detected:')
@@ -1778,7 +1813,10 @@ with st.sidebar:
         )
         focus_proj = 'UMAP'
         if view_mode == "Single (Focus)":
-            focus_proj = st.selectbox("Select Projection", ["UMAP", "t-SNE", "PCA"])
+            focus_proj = st.selectbox(
+                "Select Projection", ["UMAP", "t-SNE", "PCA"],
+                help="Choose which projection to show in the large single-view layout."
+            )
 
         color_mode = st.radio(
             'Color points by:',
@@ -1796,8 +1834,12 @@ with st.sidebar:
             )
         
         st.markdown('**Visual Tweaks**')
-        point_alpha = st.slider('Point Opacity', 0.1, 1.0, 0.7, 0.1)
-        point_size_scale = st.slider('Point Size', 0.5, 2.0, 1.0, 0.1)
+        point_alpha = st.slider('Point Opacity', 0.1, 1.0, 0.7, 0.1,
+                                help='Adjust how transparent the plot points are. '
+                                     'Lower values help when points overlap heavily.')
+        point_size_scale = st.slider('Point Size', 0.5, 2.0, 1.0, 0.1,
+                                     help='Scale all point sizes up or down. '
+                                          'Useful for dense plots where small points are hard to click.')
 
         show_download_buttons = st.checkbox('Show plot download buttons', value=False, help='Enable this to download high-resolution PNGs of the current plots for reports or presentations.')
         show_hover = st.checkbox('Show tooltip on hover', value=True, help='Uncheck to completely hide the hover tooltips for a cleaner view.')
@@ -1966,7 +2008,11 @@ with st.sidebar:
 
     with st.expander('Search & Filter', expanded=False):
         # Improved Search
-        search_query = st.text_input('Search doc_id / keyword / phrase / regex', key='search_query_input')
+        search_query = st.text_input(
+            'Search doc_id / keyword / phrase / regex', key='search_query_input',
+            help='Type a term to highlight matching documents. Matches on doc_id, keywords, and/or full text '
+                 'depending on the scopes selected below. Supports regex when "Use Regex" is checked.'
+        )
         st.session_state['search_query'] = search_query
         st.session_state['search_query_persist'] = search_query
         use_regex = st.checkbox('Use Regex', value=False, help='Treat search query as a Regular Expression.')
@@ -1975,7 +2021,11 @@ with st.sidebar:
         clusters = sorted(df['cluster'].unique().tolist()) if 'cluster' in df.columns else []
         cluster_filter = st.multiselect('Clusters', options=clusters, default=clusters, help="Filter data by topic group. Uncheck a cluster number to hide its documents from the view.")
         keyword_filter = st.multiselect('Keyword tags', options=available_keywords, default=[], help='Filter the visible points to only those containing specific keywords. Useful for narrowing down to a theme.')
-        keyword_logic_selection = st.radio("Keyword Logic", ["OR (match any)", "AND (match all)"], index=0, horizontal=True)
+        keyword_logic_selection = st.radio(
+            "Keyword Logic", ["OR (match any)", "AND (match all)"], index=0, horizontal=True,
+            help='OR: show documents that contain at least one of the selected keywords. '
+                 'AND: show only documents that contain every selected keyword.'
+        )
         
         st.markdown('**Metadata Filters**')
         cat_defaults = [c for c in ['Data Domain', 'Tool Used/Mentioned', 'Publisher'] if c in categorical_metadata]
@@ -1997,7 +2047,8 @@ with st.sidebar:
                 min_value=col_min,
                 max_value=col_max,
                 value=(col_min, col_max),
-                key=f'num_filter_{col}'
+                key=f'num_filter_{col}',
+                help=f'Show only documents where {col} falls within this range.'
             )
             numeric_ranges[col] = (low, high)
         
@@ -2013,10 +2064,13 @@ with st.sidebar:
     with st.expander('Saved Groups', expanded=True):
         if 'saved_cohorts' not in st.session_state:
             st.session_state['saved_cohorts'] = {}
-        
+
         # Save current selection
         current_sel_len = len(st.session_state['selected_ids'])
-        new_cohort_name = st.text_input('New saved group name', placeholder='e.g., Outliers, Group A')
+        new_cohort_name = st.text_input(
+            'New saved group name', placeholder='e.g., Outliers, Group A',
+            help='Name for the group you are about to save. Must be non-empty and unique.'
+        )
         if st.button('Save current selection') and new_cohort_name and current_sel_len > 0:
             st.session_state['saved_cohorts'][new_cohort_name] = list(st.session_state['selected_ids'])
             add_history_entry(
@@ -2031,25 +2085,84 @@ with st.sidebar:
         if st.session_state['saved_cohorts']:
             st.markdown('**Saved Groups**')
             cohorts_to_delete = []
-            for name, ids in st.session_state['saved_cohorts'].items():
-                c1, c2, c3 = st.columns([3, 1, 1])
-                with c1:
-                    if st.button(f"{name} ({len(ids)})", key=f"load_{name}", width="stretch"):
-                        update_selection(ids, additive=st.session_state.get('additive_mode', False))
-                        add_history_entry(
-                            'cohort_loaded',
-                            f"Loaded group '{name}' with {len(ids)} document{'s' if len(ids) != 1 else ''}",
-                            create_state_snapshot()
-                        )
-                with c2:
-                    st.write("") # Spacer
-                with c3:
-                    if st.button('Delete', key=f"del_{name}"):
-                        cohorts_to_delete.append(name)
-            
+            rename_ops = {}  # {old_name: new_name}
+            for name, ids in list(st.session_state['saved_cohorts'].items()):
+                # Build keyword preview for tooltip
+                kw_preview = ''
+                if '__tokens' in df.columns:
+                    try:
+                        grp_tokens = df[df['doc_id'].isin(ids)]['__tokens'].tolist()
+                        flat = [t for toks in grp_tokens for t in (toks if isinstance(toks, list) else []) if isinstance(t, str)]
+                        if flat:
+                            from collections import Counter
+                            top = [w for w, _ in Counter(flat).most_common(5)]
+                            kw_preview = 'Top keywords: ' + ', '.join(top)
+                    except Exception:
+                        pass
+
+                if st.session_state.get('cohort_rename_active') == name:
+                    # Rename mode: show text input + confirm/cancel
+                    new_name_val = st.text_input(
+                        'New name', value=name, key=f"rename_input_{name}",
+                        label_visibility='collapsed'
+                    )
+                    rc1, rc2 = st.columns(2)
+                    with rc1:
+                        if st.button('Confirm', key=f"rename_confirm_{name}", width="stretch"):
+                            new_name_val = new_name_val.strip()
+                            if new_name_val and new_name_val != name:
+                                rename_ops[name] = new_name_val
+                            st.session_state['cohort_rename_active'] = None
+                            st.rerun()
+                    with rc2:
+                        if st.button('Cancel', key=f"rename_cancel_{name}", width="stretch"):
+                            st.session_state['cohort_rename_active'] = None
+                            st.rerun()
+                else:
+                    c1, c2, c3 = st.columns([3, 1, 1])
+                    with c1:
+                        btn_help = kw_preview if kw_preview else f"{len(ids)} documents"
+                        if st.button(f"{name} ({len(ids)})", key=f"load_{name}", width="stretch", help=btn_help):
+                            update_selection(ids, additive=st.session_state.get('additive_mode', False))
+                            add_history_entry(
+                                'cohort_loaded',
+                                f"Loaded group '{name}' with {len(ids)} document{'s' if len(ids) != 1 else ''}",
+                                create_state_snapshot()
+                            )
+                    with c2:
+                        if st.button('✏', key=f"rename_{name}", width="stretch", help='Rename this group'):
+                            st.session_state['cohort_rename_active'] = name
+                            st.rerun()
+                    with c3:
+                        if st.button('Delete', key=f"del_{name}"):
+                            cohorts_to_delete.append(name)
+
+                # Notes field (always shown below the group row)
+                note_key = f"note_{name}"
+                current_note = st.session_state['saved_cohort_notes'].get(name, '')
+                new_note = st.text_input(
+                    'Notes', value=current_note, key=note_key,
+                    placeholder='Why is this group interesting?',
+                    label_visibility='collapsed',
+                    help='Annotation for this saved group'
+                )
+                if new_note != current_note:
+                    st.session_state['saved_cohort_notes'][name] = new_note
+
+            # Apply rename operations
+            if rename_ops:
+                for old_name, new_name in rename_ops.items():
+                    if new_name not in st.session_state['saved_cohorts']:
+                        st.session_state['saved_cohorts'][new_name] = st.session_state['saved_cohorts'].pop(old_name)
+                        # Migrate notes
+                        if old_name in st.session_state['saved_cohort_notes']:
+                            st.session_state['saved_cohort_notes'][new_name] = st.session_state['saved_cohort_notes'].pop(old_name)
+                st.rerun()
+
             if cohorts_to_delete:
                 for name in cohorts_to_delete:
                     del st.session_state['saved_cohorts'][name]
+                    st.session_state['saved_cohort_notes'].pop(name, None)
                 st.rerun()
         else:
             st.caption("No saved groups yet.")
@@ -2061,9 +2174,27 @@ with st.sidebar:
         select_doc = st.selectbox('Jump to doc_id', options=doc_options or [''], index=0, help='Instantly select and center on a specific document by ID.')
         if st.button('Highlight doc', key='btn_highlight_doc') and select_doc:
             update_selection([select_doc], additive=False)
-        multi_select = st.multiselect('Pin doc_ids (max 15)', options=doc_options, default=st.session_state['selected_ids'][:5], max_selections=15, help="Manually select specific documents to keep them highlighted, even if you click elsewhere.")
-        if st.button('Apply pinned selection', key='btn_apply_multi'):
-            update_selection(multi_select or [], additive=False)
+        pinned_default = st.session_state.get('pinned_doc_ids', [])[:15]
+        multi_select = st.multiselect(
+            'Pinned docs (max 15)', options=doc_options,
+            default=[d for d in pinned_default if d in doc_options],
+            max_selections=15,
+            help="Pinned documents stay highlighted (shown in orange) regardless of your current selection. "
+                 "Use this to keep reference documents visible while exploring."
+        )
+        pcol1, pcol2 = st.columns(2)
+        with pcol1:
+            if st.button('Pin selected', key='btn_apply_multi', width="stretch",
+                         help='Pin the documents chosen above so they stay highlighted across all selections.'):
+                st.session_state['pinned_doc_ids'] = list(multi_select or [])
+                st.rerun()
+        with pcol2:
+            if st.button('Clear pins', key='btn_clear_pins', width="stretch",
+                         help='Remove all pinned documents.'):
+                st.session_state['pinned_doc_ids'] = []
+                st.rerun()
+        if st.session_state.get('pinned_doc_ids'):
+            st.caption(f"📌 {len(st.session_state['pinned_doc_ids'])} doc(s) pinned")
         
         st.markdown('**Controls**')
         # Quick actions row
@@ -2108,7 +2239,12 @@ with st.sidebar:
         # Export selection
         if st.session_state['selected_ids']:
             st.markdown('**Download Selection**')
-            n_download = st.number_input('Limit download items count', min_value=1, max_value=max(1, len(st.session_state['selected_ids'])), value=len(st.session_state['selected_ids']), step=1)
+            n_download = st.number_input(
+                'Limit download items count', min_value=1,
+                max_value=max(1, len(st.session_state['selected_ids'])),
+                value=len(st.session_state['selected_ids']), step=1,
+                help='Cap the number of documents to include in the exported file.'
+            )
             download_ids = st.session_state['selected_ids'][:n_download]
             import json
             export_data = {
@@ -2163,6 +2299,9 @@ with st.sidebar:
                     'search_query': search_query,
                     'cluster_filter': cluster_filter,
                     'color_mode': color_mode,
+                    'saved_cohorts': {k: list(v) for k, v in st.session_state.get('saved_cohorts', {}).items()},
+                    'saved_cohort_notes': dict(st.session_state.get('saved_cohort_notes', {})),
+                    'pinned_doc_ids': list(st.session_state.get('pinned_doc_ids', [])),
                     'timestamp': pd.Timestamp.now().isoformat()
                 }
                 os.makedirs('sessions', exist_ok=True)
@@ -2181,6 +2320,12 @@ with st.sidebar:
                     with open(f'sessions/{load_session}.json', 'r') as f:
                         session_data = json.load(f)
                     st.session_state['selected_ids'] = session_data.get('selected_ids', [])
+                    if 'saved_cohorts' in session_data:
+                        st.session_state['saved_cohorts'] = session_data['saved_cohorts']
+                    if 'saved_cohort_notes' in session_data:
+                        st.session_state['saved_cohort_notes'] = session_data['saved_cohort_notes']
+                    if 'pinned_doc_ids' in session_data:
+                        st.session_state['pinned_doc_ids'] = session_data['pinned_doc_ids']
                     st.success(f'Loaded session: {load_session}')
                     st.rerun()
 
@@ -2319,6 +2464,11 @@ if _table_state is not None:
     except Exception:
         pass
 st.session_state['focused_ids'] = focused_ids
+
+# Merge pinned docs into focused_ids so they stay highlighted across all selections
+_pinned = st.session_state.get('pinned_doc_ids', [])
+if _pinned:
+    focused_ids = list(set(focused_ids) | set(_pinned))
 
 # Centralized Selection Logic: Process chart events before rendering new plots
 # This ensures that a selection in any chart updates all charts immediately (fixing directional bugs).
@@ -3866,31 +4016,31 @@ with st.expander("Session Reasoning Trail", expanded=False):
     """
     
     history_log = st.session_state.get('history_log', [])
-    
+
     if history_log:
-        # Create columns for display and actions
-        col1_exp, col2_exp = st.columns([4, 1])
-        
-        with col2_exp:
-            if st.button("Export as TXT", key="export_history"):
-                # Format history for export
-                export_lines = ['=== Session Reasoning Trail ===\n']
-                export_lines.append(f'Session generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
-                export_lines.append(f'Total actions: {len(history_log)}\n\n')
-                
-                for i, entry in enumerate(history_log, 1):
-                    export_lines.append(f"{i}. [{entry['timestamp']}] {entry['action_type'].upper()}")
-                    export_lines.append(f"   {entry['description']}\n")
-                
-                export_text = '\n'.join(export_lines)
-                st.download_button(
-                    label="Download TXT",
-                    data=export_text,
-                    file_name=f"session_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                    mime="text/plain",
-                    key="download_history"
-                )
-        
+        # Pre-compute export text so we can offer a direct download button without a two-click flow
+        _export_lines = ['=== Session Reasoning Trail ===\n']
+        _export_lines.append(f'Session generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
+        _export_lines.append(f'Total actions: {len(history_log)}\n\n')
+        for _i, _entry in enumerate(history_log, 1):
+            _export_lines.append(f"{_i}. [{_entry['timestamp']}] {_entry['action_type'].upper()}")
+            _export_lines.append(f"   {_entry['description']}\n")
+        _export_text = '\n'.join(_export_lines)
+
+        # Header row: title + download button always visible at the top of the expander
+        _hcol1, _hcol2 = st.columns([4, 1])
+        with _hcol1:
+            st.caption(f"{len(history_log)} action(s) logged — newest first")
+        with _hcol2:
+            st.download_button(
+                label="Export TXT",
+                data=_export_text,
+                file_name=f"session_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                mime="text/plain",
+                key="download_history",
+                help="Download the full reasoning trail as a plain-text file",
+            )
+
         # Display history entries
         for i, entry in enumerate(reversed(history_log)):
             cols = st.columns([0.5, 3, 1.5])
